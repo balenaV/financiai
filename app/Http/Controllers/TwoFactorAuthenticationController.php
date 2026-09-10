@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\TwoFactorConfirmRequest;
 use App\Http\Requests\TwoFactorEnableRequest;
 use App\Http\Requests\TwoFactorPasswordConfirmationRequest;
+use App\Services\ReauthenticationService;
 use App\Services\TwoFactorAuthenticationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -13,13 +14,20 @@ use Illuminate\Support\Str;
 class TwoFactorAuthenticationController extends Controller
 {
     /**
-     * Etapa 1: gera um novo secret pendente e devolve o QR + a chave manual.
-     * TwoFactorEnableRequest exige a senha atual quando o MFA já está ativo
-     * — ver o comentário da classe para o porquê.
+     * Etapa 1: gera um secret pendente e devolve o QR + a chave manual.
+     * TwoFactorEnableRequest exige reautenticação (senha ou re-consentimento
+     * no provedor social) sempre — ver o comentário da classe para o porquê.
      */
-    public function store(TwoFactorEnableRequest $request, TwoFactorAuthenticationService $service): JsonResponse
-    {
+    public function store(
+        TwoFactorEnableRequest $request,
+        TwoFactorAuthenticationService $service,
+        ReauthenticationService $reauth,
+    ): JsonResponse {
         $secret = $service->startActivation($request->user());
+
+        // Abre (ou mantém) a janela de identidade provada que o confirm() logo
+        // abaixo vai exigir. markConfirmed não estende uma janela já viva.
+        $reauth->markConfirmed($request->session());
 
         return response()->json([
             'key' => trim(chunk_split($secret, 4, ' ')),
@@ -31,11 +39,25 @@ class TwoFactorAuthenticationController extends Controller
      * Etapa 2 → 3: confirma o código de 6 dígitos, ativa o MFA e devolve os
      * códigos de recuperação em claro — só aparecem aqui, uma vez.
      */
-    public function confirm(TwoFactorConfirmRequest $request, TwoFactorAuthenticationService $service): JsonResponse
-    {
+    public function confirm(
+        TwoFactorConfirmRequest $request,
+        TwoFactorAuthenticationService $service,
+        ReauthenticationService $reauth,
+    ): JsonResponse {
         $user = $request->user();
 
-        if (! $service->verifyCode($user, $request->validated('code'))) {
+        // A cerimônia de ativação inteira tem que caber numa única janela de
+        // identidade provada. É isso que impede um secret pendente abandonado
+        // de ficar confirmável para sempre: quem tiver visto o QR uma vez
+        // (tela compartilhada, print) e conseguir uma sessão depois não troca
+        // o segundo fator sem provar quem é.
+        if (! $reauth->confirmedRecently($request->session())) {
+            return response()->json([
+                'message' => 'Sua confirmação de identidade expirou. Feche e comece a ativação de novo.',
+            ], 422);
+        }
+
+        if (! $service->verifyPendingCode($user, $request->validated('code'))) {
             return response()->json([
                 'message' => 'Código inválido ou já expirado.',
             ], 422);

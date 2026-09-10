@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\BudgetService;
 use App\Services\DashboardService;
+use App\Services\ReauthenticationService;
 use App\Services\TransactionService;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -115,6 +116,9 @@ class DashboardController extends Controller
         return view('dashboard', [
             'dashboard' => $data,
             'filters' => $filters,
+            // Provedor a oferecer no re-consentimento quando a conta não tem
+            // senha utilizável (login social) — ver ReauthenticationService.
+            'reauthProvider' => app(ReauthenticationService::class)->availableProvider($request->user()),
             'editAccount' => $editAccount,
             'editCard' => $editCard,
             'editTransaction' => $editTransaction,

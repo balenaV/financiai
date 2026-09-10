@@ -6,13 +6,7 @@ use App\Http\Requests\Concerns\ConfirmsReauthentication;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
-/**
- * Reautenticação exigida tanto para desativar o MFA quanto para gerar novos
- * códigos de recuperação. Passou a aceitar re-consentimento OAuth além da
- * senha, o que destrava esses dois fluxos para contas criadas por login
- * social — que antes não tinham como cumprir a exigência de current_password.
- */
-class TwoFactorPasswordConfirmationRequest extends FormRequest
+class LogoutOtherSessionsRequest extends FormRequest
 {
     use ConfirmsReauthentication;
 
@@ -24,6 +18,6 @@ class TwoFactorPasswordConfirmationRequest extends FormRequest
      */
     public function rules(): array
     {
-        return $this->reauthenticationRules();
+        return $this->reauthenticationRules('password');
     }
 }

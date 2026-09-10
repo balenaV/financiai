@@ -15,6 +15,9 @@ use Illuminate\Support\Collection;
 
 class DashboardService
 {
+    /** Mesmo teto usado em AccountController::show e InvestmentController::show. */
+    private const MAX_REPORT_ROWS = 5000;
+
     public function __construct(
         private readonly AccountBalanceService $balances,
         private readonly BudgetService $budgets,
@@ -169,13 +172,21 @@ class DashboardService
             ->where('status', TransactionStatus::Completed->value)
             ->where(fn ($query) => $query->whereNull('source_type')->orWhere('source_type', '!=', 'credit_card_bill'))
             ->whereBetween('competence_date', [$start, $end])
+            // Mesmo teto do extrato de conta e do histórico de investimento:
+            // a ordenação/paginação acontece em memória, e o dashboard inteiro
+            // passa por aqui a cada carregamento — sem limite, uma conta com
+            // muitos lançamentos importados vira consumo de memória por
+            // request (achado M5).
+            ->limit(self::MAX_REPORT_ROWS)
             ->get();
 
         $sorted = match ($sort) {
             'desc' => $items->sortBy(fn ($t) => mb_strtolower($t->description)),
             'categoria' => $items->sortBy(fn ($t) => mb_strtolower($t->category?->name ?? '')),
             'conta' => $items->sortBy(fn ($t) => mb_strtolower($t->account?->name ?? $t->creditCard?->name ?? '')),
-            'valor' => $items->sortBy(fn ($t) => (float) $t->amount),
+            // Centavos inteiros: ordenar por (float) num valor monetário é
+            // exatamente o que a regra de dinheiro do projeto proíbe.
+            'valor' => $items->sortBy(fn ($t) => Money::toMinor((string) $t->amount)),
             default => $items->sortBy(fn ($t) => $t->competence_date),
         };
 
@@ -202,19 +213,24 @@ class DashboardService
      */
     private function delta(array $series): array
     {
-        $current = (float) ($series[count($series) - 1] ?? 0);
-        $previous = (float) ($series[count($series) - 2] ?? 0);
-        $diff = $current - $previous;
+        // bcmath do começo ao fim: a comparação com zero decide o rótulo
+        // "estável", e com float um centavo de diferença podia cair do lado
+        // errado da margem (achado M4).
+        $current = Money::normalize((string) ($series[count($series) - 1] ?? '0'));
+        $previous = Money::normalize((string) ($series[count($series) - 2] ?? '0'));
+        $diff = bcsub($current, $previous, 2);
 
-        if (abs($diff) < 0.01) {
+        if (bccomp($diff, '0.00', 2) === 0) {
             return ['state' => 'estavel', 'percentage' => null];
         }
 
-        $percentage = $previous != 0.0
-            ? round(($diff / abs($previous)) * 100, 1)
+        $previousAbs = bccomp($previous, '0.00', 2) < 0 ? bcmul($previous, '-1', 2) : $previous;
+
+        $percentage = bccomp($previousAbs, '0.00', 2) !== 0
+            ? round((float) bcdiv(bcmul($diff, '100', 4), $previousAbs, 4), 1)
             : null;
 
-        return ['state' => $diff > 0 ? 'alta' : 'baixa', 'percentage' => $percentage];
+        return ['state' => bccomp($diff, '0.00', 2) > 0 ? 'alta' : 'baixa', 'percentage' => $percentage];
     }
 
     private function categoriesOverview(User $user): Collection

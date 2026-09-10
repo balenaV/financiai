@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\AccountDeletionRequest;
+use App\Http\Requests\LogoutOtherSessionsRequest;
 use App\Http\Requests\ProfileUpdateRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -54,10 +56,8 @@ class ProfileController extends Controller
 
     /** Encerra todas as sessões do usuário, exceto a atual — sem depender do
      *  middleware de "auth.session" do Fortify/Jetstream, que este app não usa. */
-    public function logoutOtherSessions(Request $request): RedirectResponse
+    public function logoutOtherSessions(LogoutOtherSessionsRequest $request): RedirectResponse
     {
-        $request->validate(['password' => ['required', 'current_password']]);
-
         DB::table('sessions')
             ->where('user_id', $request->user()->id)
             ->where('id', '!=', $request->session()->getId())
@@ -69,12 +69,8 @@ class ProfileController extends Controller
     /**
      * Delete the user's account.
      */
-    public function destroy(Request $request): RedirectResponse
+    public function destroy(AccountDeletionRequest $request): RedirectResponse
     {
-        $request->validateWithBag('userDeletion', [
-            'password' => ['required', 'current_password'],
-        ]);
-
         $user = $request->user();
         $avatarPath = $user->avatar_path;
 

@@ -11,6 +11,7 @@ use App\Http\Controllers\FinancialGoalController;
 use App\Http\Controllers\InvestmentController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ReauthenticationController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\TransactionController;
@@ -66,6 +67,10 @@ Route::middleware(['auth', 'verified', 'audit'])->group(function () {
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->middleware('throttle:5,1')->name('profile.destroy');
     Route::patch('/profile/sessions/logout-other', [ProfileController::class, 'logoutOtherSessions'])->middleware('throttle:5,1')->name('profile.logout-other-sessions');
+    // 5/min como no password.update: para quem já tem a sessão, este endpoint
+    // é um oráculo de senha online, e o limite frouxo daria milhares de
+    // tentativas por dia com resposta perfeitamente distinguível.
+    Route::post('/settings/reauthenticate', [ReauthenticationController::class, 'store'])->middleware('throttle:5,1')->name('reauthenticate');
     Route::post('/settings/two-factor', [TwoFactorAuthenticationController::class, 'store'])->middleware('throttle:10,1')->name('two-factor.enable');
     Route::post('/settings/two-factor/confirm', [TwoFactorAuthenticationController::class, 'confirm'])->middleware('throttle:10,1')->name('two-factor.confirm');
     Route::post('/settings/two-factor/recovery-codes', [TwoFactorAuthenticationController::class, 'regenerateRecoveryCodes'])->middleware('throttle:5,1')->name('two-factor.recovery-codes');

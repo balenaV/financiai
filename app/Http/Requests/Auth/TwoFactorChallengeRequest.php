@@ -98,8 +98,14 @@ class TwoFactorChallengeRequest extends FormRequest
         ])->errorBag('mfa');
     }
 
+    /**
+     * Chaveado só pelo usuário do desafio, sem o IP: com o IP na chave, quem
+     * já tem a senha reinicia o balde a cada troca de IP e consegue varrer o
+     * espaço do TOTP com um pool de proxies (achado A2). Mesmo critério que o
+     * Fortify usa (Limit::perMinute(5)->by(session('login.id'))).
+     */
     private function throttleKey(): string
     {
-        return 'two-factor|'.$this->session()->get('two_factor.user_id').'|'.$this->ip();
+        return 'two-factor|'.$this->session()->get('two_factor.user_id');
     }
 }

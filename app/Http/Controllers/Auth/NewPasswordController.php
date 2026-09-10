@@ -47,8 +47,11 @@ class NewPasswordController extends Controller
         $status = Password::reset(
             $request->only('email', 'password', 'password_confirmation', 'token'),
             function (User $user) use ($request) {
+                // Definir senha aqui é justamente como uma conta criada por
+                // login social passa a ter uma senha que o dono conhece.
                 $user->forceFill([
                     'password' => Hash::make($request->password),
+                    'has_usable_password' => true,
                     'remember_token' => Str::random(60),
                 ])->save();
 

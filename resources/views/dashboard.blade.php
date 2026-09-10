@@ -1920,7 +1920,19 @@
                     <button class="btn-ghost" type="button" data-modal-open="encerrarSessoes">Encerrar as outras</button>
                   </div>
 
-                  <div class="mfa-card" data-mfa-card data-active="{{ $user->hasTwoFactorEnabled() ? 'true' : 'false' }}">
+                  <div class="mfa-card" data-mfa-card data-active="{{ $user->hasTwoFactorEnabled() ? 'true' : 'false' }}"
+                       data-mfa-has-password="{{ $user->hasUsablePassword() ? 'true' : 'false' }}"
+                       data-mfa-url-reauth="{{ route('reauthenticate') }}"
+                       {{-- Oferecido sempre que houver provedor vinculado, não só
+                            para quem tem has_usable_password = false: contas de
+                            login social criadas ANTES dessa coluna existir ficaram
+                            marcadas como "tem senha" e só conhecem uma senha
+                            aleatória — sem esta saída elas travariam em "senha
+                            incorreta" para sempre. --}}
+                       @if($reauthProvider)
+                           data-mfa-url-reauth-social="{{ route('social.reauthenticate', $reauthProvider) }}"
+                           data-mfa-reauth-provider-label="{{ $reauthProvider === 'github' ? 'GitHub' : 'Google' }}"
+                       @endif>
                     <div class="mfa-card__head">
                       <span class="mfa-card__icon" aria-hidden="true"><i class="fa-solid fa-shield-halved"></i></span>
                       <div class="mfa-card__body">
@@ -2899,6 +2911,39 @@
 </div>
 
 <!-- ============ Modais de dois fatores ============ -->
+{{-- Confirmação de identidade antes de INICIAR a ativação do MFA. O modal de
+     senha do handoff (mfa-senha) atende só desativar/regerar, que já nascem com
+     campo de senha; ativar não tinha nenhum, e passou a exigir reautenticação
+     (achado A1). Vive fora do mfa.js, que é cópia do handoff e não se edita. --}}
+<div class="modal" data-modal="mfa-reautenticar" hidden>
+  <div class="modal__veil" data-modal-close></div>
+  <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="modal-mfa-reauth-titulo">
+    <div class="modal__head">
+      <div>
+        <h2 class="modal__title" id="modal-mfa-reauth-titulo">Confirme que é você</h2>
+        <p class="modal__sub">Ativar a verificação em duas etapas exige confirmar sua identidade.</p>
+      </div>
+      <button class="modal__close" type="button" aria-label="Fechar" data-modal-close><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    </div>
+
+    <div class="modal__body">
+      <label class="field">
+        <span class="field__label">Sua senha atual</span>
+        <input class="input" type="password" autocomplete="current-password" placeholder="Sua senha" data-mfa-reauth-password>
+      </label>
+      <p class="field__error" data-mfa-reauth-error hidden>Senha incorreta. Tente de novo.</p>
+      <p class="mfa-links" data-mfa-reauth-social-wrap hidden>
+        <a class="link-sm" href="#" data-mfa-reauth-social-link>Não sei minha senha — confirmar pelo provedor</a>
+      </p>
+    </div>
+
+    <div class="modal__foot">
+      <button class="btn-ghost" type="button" data-modal-close>Cancelar</button>
+      <button class="btn-primary btn-primary--sm" type="button" data-mfa-reauth-confirm>Confirmar</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" data-modal="mfa-ativar" hidden
      data-mfa-url-start="{{ route('two-factor.enable') }}"
      data-mfa-url-confirm="{{ route('two-factor.confirm') }}">

@@ -15,11 +15,23 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Storage;
 
 #[Fillable(['name', 'email', 'password', 'avatar_path'])]
-#[Hidden(['password', 'remember_token', 'two_factor_secret'])]
+#[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_pending_secret'])]
 class User extends Authenticatable implements MustVerifyEmail
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
+
+    /**
+     * O default da coluna só existe no banco: sem repeti-lo aqui, uma
+     * instância recém-criada e ainda não relida (o caso de actingAs, e de
+     * qualquer código que use o objeto logo após o create) leria null e
+     * seria tratada como conta sem senha utilizável.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'has_usable_password' => true,
+    ];
 
     protected static function booted(): void
     {
@@ -135,6 +147,16 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     /**
+     * Contas criadas por login social recebem uma senha aleatória que o dono
+     * nunca chega a ver — para elas, exigir "current_password" tranca a porta
+     * em vez de proteger. Ver App\Services\ReauthenticationService.
+     */
+    public function hasUsablePassword(): bool
+    {
+        return (bool) $this->has_usable_password;
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -145,6 +167,8 @@ class User extends Authenticatable implements MustVerifyEmail
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'two_factor_secret' => 'encrypted',
+            'two_factor_pending_secret' => 'encrypted',
+            'has_usable_password' => 'boolean',
             'two_factor_confirmed_at' => 'datetime',
         ];
     }

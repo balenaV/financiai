@@ -6,15 +6,12 @@ use App\Http\Requests\Concerns\ConfirmsReauthentication;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
-/**
- * Reautenticação exigida tanto para desativar o MFA quanto para gerar novos
- * códigos de recuperação. Passou a aceitar re-consentimento OAuth além da
- * senha, o que destrava esses dois fluxos para contas criadas por login
- * social — que antes não tinham como cumprir a exigência de current_password.
- */
-class TwoFactorPasswordConfirmationRequest extends FormRequest
+class AccountDeletionRequest extends FormRequest
 {
     use ConfirmsReauthentication;
+
+    /** Mantém o bag que a modal de encerrar conta já lê no dashboard. */
+    protected $errorBag = 'userDeletion';
 
     /** @var array<int, string> */
     protected $dontFlash = ['current_password', 'password', 'password_confirmation'];
@@ -24,6 +21,6 @@ class TwoFactorPasswordConfirmationRequest extends FormRequest
      */
     public function rules(): array
     {
-        return $this->reauthenticationRules();
+        return $this->reauthenticationRules('password');
     }
 }

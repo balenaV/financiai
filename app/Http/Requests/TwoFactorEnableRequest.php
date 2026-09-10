@@ -2,30 +2,31 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ConfirmsReauthentication;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
- * O botão "Ativar" só existe na UI quando o MFA está desligado — mas o
- * endpoint em si não tinha nenhuma defesa própria contra ser chamado direto
- * (ex.: sessão sequestrada) enquanto o MFA já estava ativo. Sem isso, um
- * POST bastava para gerar um secret novo e apagar os códigos de recuperação
- * do dono legítimo, sem nunca provar a senha — o mesmo efeito de desativar
- * o MFA, só que sem passar pela reautenticação que destroy() exige.
+ * Ativar o MFA é ação sensível mesmo quando não havia MFA antes.
+ *
+ * Sem reautenticação aqui, uma sessão sequestrada bastava para cadastrar um
+ * secret novo no autenticador do atacante; como a confirmação encerra as
+ * demais sessões e rotaciona o remember_token, o dono legítimo era expulso e
+ * ficava sem como voltar — a senha dele continuava válida, mas o segundo
+ * fator passava a ser de outra pessoa (achado A1).
  */
 class TwoFactorEnableRequest extends FormRequest
 {
+    use ConfirmsReauthentication;
+
+    /** @var array<int, string> */
+    protected $dontFlash = ['current_password', 'password', 'password_confirmation'];
+
     /**
      * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
-        if (! $this->user()->hasTwoFactorEnabled()) {
-            return [];
-        }
-
-        return [
-            'current_password' => ['required', 'current_password'],
-        ];
+        return $this->reauthenticationRules();
     }
 }

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Auth;
 
 use App\Models\User;
+use App\Services\ReauthenticationService;
 use App\Services\TwoFactorAuthenticationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -20,7 +21,9 @@ class TwoFactorAuthenticationTest extends TestCase
         $secret = $this->app->make(TwoFactorAuthenticationService::class)->startActivation($user);
         $code = $this->app->make(Google2FA::class)->getCurrentOtp($secret);
 
-        $response = $this->actingAs($user)->postJson(route('two-factor.confirm'), ['code' => $code]);
+        $response = $this->actingAs($user)
+            ->withSession([ReauthenticationService::SESSION_KEY => time()])
+            ->postJson(route('two-factor.confirm'), ['code' => $code]);
 
         $response->assertOk()->assertJsonStructure(['confirmed_at', 'recovery_codes']);
         $this->assertCount(8, $response->json('recovery_codes'));
@@ -33,7 +36,9 @@ class TwoFactorAuthenticationTest extends TestCase
         $user = User::factory()->create();
         $this->app->make(TwoFactorAuthenticationService::class)->startActivation($user);
 
-        $response = $this->actingAs($user)->postJson(route('two-factor.confirm'), ['code' => '000000']);
+        $response = $this->actingAs($user)
+            ->withSession([ReauthenticationService::SESSION_KEY => time()])
+            ->postJson(route('two-factor.confirm'), ['code' => '000000']);
 
         $response->assertStatus(422);
         $this->assertFalse($user->fresh()->hasTwoFactorEnabled());
@@ -130,14 +135,61 @@ class TwoFactorAuthenticationTest extends TestCase
         $response = $this->actingAs($user)->postJson(route('two-factor.enable'), ['current_password' => 'password']);
 
         $response->assertOk()->assertJsonStructure(['key', 'qr']);
-        $this->assertNotSame($originalSecret, $user->fresh()->two_factor_secret);
+
+        // O secret novo fica pendente; o MFA em vigor só é substituído na
+        // confirmação (achado M1).
+        $user->refresh();
+        $this->assertNotNull($user->two_factor_pending_secret);
+        $this->assertSame($originalSecret, $user->two_factor_secret);
+        $this->assertTrue($user->hasTwoFactorEnabled());
     }
 
-    public function test_first_time_activation_does_not_require_a_password(): void
+    /**
+     * Achado A1: ativar o MFA pela primeira vez também é ação sensível. Sem
+     * reautenticação aqui, uma sessão sequestrada cadastrava o secret do
+     * atacante e — como a confirmação encerra as outras sessões — expulsava
+     * o dono legítimo de vez.
+     */
+    public function test_first_time_activation_also_requires_reauthentication(): void
     {
         $user = User::factory()->create();
 
-        $this->actingAs($user)->postJson(route('two-factor.enable'))->assertOk();
+        $this->actingAs($user)->postJson(route('two-factor.enable'))->assertStatus(422);
+
+        $this->assertNull($user->fresh()->two_factor_pending_secret);
+    }
+
+    public function test_first_time_activation_succeeds_with_the_current_password(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->postJson(route('two-factor.enable'), ['current_password' => 'password'])
+            ->assertOk()
+            ->assertJsonStructure(['key', 'qr']);
+
+        $this->assertNotNull($user->fresh()->two_factor_pending_secret);
+    }
+
+    /**
+     * Achado M1: abrir o modal de ativação e desistir no meio (fechar a aba,
+     * errar o código, cair a conexão) não pode derrubar um MFA já ativo nem
+     * apagar os códigos de recuperação do dono.
+     */
+    public function test_abandoning_the_activation_flow_keeps_the_existing_two_factor_intact(): void
+    {
+        $user = $this->createUserWithTwoFactor();
+        $originalSecret = $user->two_factor_secret;
+
+        $this->actingAs($user)
+            ->postJson(route('two-factor.enable'), ['current_password' => 'password'])
+            ->assertOk();
+
+        // Usuário some sem confirmar: nada mais acontece.
+        $user->refresh();
+        $this->assertTrue($user->hasTwoFactorEnabled());
+        $this->assertSame($originalSecret, $user->two_factor_secret);
+        $this->assertSame(8, $user->twoFactorRecoveryCodes()->count());
     }
 
     public function test_confirming_two_factor_revokes_other_sessions_and_remember_token(): void
@@ -155,7 +207,10 @@ class TwoFactorAuthenticationTest extends TestCase
         $secret = $this->app->make(TwoFactorAuthenticationService::class)->startActivation($user);
         $code = $this->app->make(Google2FA::class)->getCurrentOtp($secret);
 
-        $this->actingAs($user)->postJson(route('two-factor.confirm'), ['code' => $code])->assertOk();
+        $this->actingAs($user)
+            ->withSession([ReauthenticationService::SESSION_KEY => time()])
+            ->postJson(route('two-factor.confirm'), ['code' => $code])
+            ->assertOk();
 
         $this->assertNotSame('old-token', $user->fresh()->remember_token);
         $this->assertDatabaseMissing('sessions', ['id' => 'other-session']);

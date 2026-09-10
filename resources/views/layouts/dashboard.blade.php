@@ -39,6 +39,7 @@
 <script src="{{ asset('design/js/dashboard-settings-sync.js') }}"></script>
 <script src="{{ asset('design/js/form-widgets-sync.js') }}"></script>
 <script src="{{ asset('design/js/mfa.js') }}"></script>
+<script src="{{ asset('design/js/mfa-reauth-sync.js') }}"></script>
 <script>
     setTimeout(() => {
         document.querySelectorAll('#toast-container .toast').forEach((el) => {
