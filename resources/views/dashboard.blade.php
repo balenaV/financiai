@@ -172,7 +172,7 @@
         <div class="topbar__actions">
           <button class="icon-btn" type="button" data-notif-toggle aria-label="Notificações" aria-expanded="false">
             <i class="fa-regular fa-bell" aria-hidden="true"></i>
-            @if($summary['overdue_count'] + $summary['overdue_bill_count'] + $summary['upcoming_count'] > 0)
+            @if($summary['overdue_count'] + $summary['overdue_bill_count'] + $summary['upcoming_count'] + $unreadNotificationCount > 0)
               <span class="icon-btn__dot"></span>
             @endif
           </button>
@@ -183,9 +183,27 @@
           <div class="notif-panel" data-notif-panel hidden>
             <div class="notif-panel__head">
               <span class="notif-panel__title">Notificações</span>
-              <span class="notif-panel__count">{{ $summary['overdue_count'] + $summary['overdue_bill_count'] + ($summary['upcoming_count'] > 0 ? 1 : 0) }} pendências</span>
+              {{-- Único ponto de entrada de /notifications no app. --}}
+              <a class="link-sm" href="{{ route('notifications.index') }}">Ver todas</a>
+              <span class="notif-panel__count">{{ $summary['overdue_count'] + $summary['overdue_bill_count'] + ($summary['upcoming_count'] > 0 ? 1 : 0) + $unreadNotificationCount }} pendências</span>
             </div>
             <div>
+              {{-- Lembretes individuais gerados pelo comando agendado
+                   finance:send-reminders. Antes só existiam em /notifications,
+                   que nenhuma tela do app alcançava. --}}
+              @foreach($unreadNotifications as $notification)
+                <form method="POST" action="{{ route('notifications.read', $notification->id) }}">
+                  @csrf
+                  @method('PATCH')
+                  <button class="notif" type="submit">
+                    <span class="notif__icon"><i class="fa-regular fa-bell" aria-hidden="true"></i></span>
+                    <span class="notif__body">
+                      <span class="notif__title">{{ $notification->data['title'] ?? 'Lembrete financeiro' }}</span>
+                      <span class="notif__text">{{ $notification->data['message'] ?? $notification->created_at->diffForHumans() }}</span>
+                    </span>
+                  </button>
+                </form>
+              @endforeach
               @if($summary['overdue_bill_count'] > 0)
                 <button class="notif" type="button">
                   <span class="notif__icon notif__icon--fg"><i class="fa-regular fa-credit-card" aria-hidden="true"></i></span>
@@ -213,11 +231,18 @@
                   </span>
                 </button>
               @endif
-              @if($summary['overdue_count'] === 0 && $summary['overdue_bill_count'] === 0 && $summary['upcoming_count'] === 0)
+              @if($summary['overdue_count'] === 0 && $summary['overdue_bill_count'] === 0 && $summary['upcoming_count'] === 0 && $unreadNotifications->isEmpty())
                 <p style="padding: 16px; font-size: 14px; color: var(--muted);">Nenhuma pendência por aqui.</p>
               @endif
             </div>
-            <button class="notif-panel__foot" type="button" data-notif-read>Marcar todas como lidas</button>
+            {{-- Antes era um type="button" que só escondia o painel e apagava o
+                 pontinho: as notificações continuavam não lidas no banco e
+                 voltavam no próximo carregamento. Agora é um envio de verdade. --}}
+            <form method="POST" action="{{ route('notifications.read-all') }}">
+              @csrf
+              @method('PATCH')
+              <button class="notif-panel__foot" type="submit" data-notif-read>Marcar todas como lidas</button>
+            </form>
           </div>
         </div>
       </div>
@@ -679,6 +704,12 @@
                     <span class="account-card__figure-label">Atual</span>
                     <span class="account-card__figure-value" data-money>{{ Money::format($row['current'], $hide) }}</span>
                   </span>
+                  {{-- Porta de entrada do extrato completo (paginado, com busca
+                       e filtro por tipo). Sem este link a página existia mas era
+                       inalcançável: nada no app apontava para accounts.show. --}}
+                  <a class="btn-outline-hard btn-outline--sm" href="{{ route('accounts.show', $row['account']) }}">
+                    <i class="fa-solid fa-list" aria-hidden="true"></i>Extrato completo
+                  </a>
                   <button class="btn-icon btn-icon--sm" type="button" aria-label="Fechar histórico" data-account-close><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
                 </span>
               </div>
@@ -762,6 +793,11 @@
                             <div class="menu__list" role="menu" hidden data-menu-list>
                               <button class="menu__item" type="button" role="menuitem" data-card-invoices="{{ $row['card']->id }}"><i class="fa-solid fa-receipt" aria-hidden="true"></i>Ver faturas</button>
                               <button class="menu__item" type="button" role="menuitem" data-card-pay="{{ $row['card']->id }}"><i class="fa-solid fa-money-check-dollar" aria-hidden="true"></i>Registrar pagamento</button>
+                              {{-- Página do cartão: é para onde o lembrete de
+                                   fatura aponta e de onde sai o formulário de
+                                   fatura em tela cheia. Nada no app linkava
+                                   para cá, então essa jornada ficava morta. --}}
+                              <a class="menu__item" role="menuitem" href="{{ route('credit-cards.show', $row['card']) }}"><i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i>Abrir página do cartão</a>
                               <a class="menu__item menu__item--sep" role="menuitem" href="{{ route('dashboard', array_merge($filters, ['edit_card' => $row['card']->id])) }}#cartoes"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i>Editar cartão</a>
                             </div>
                           </div>
@@ -1146,6 +1182,10 @@
                       <button class="btn-icon btn-icon--sm" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Ações" data-menu-btn><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></button>
                       <div class="menu__list" role="menu" hidden data-menu-list>
                         <button class="menu__item" type="button" role="menuitem" data-invest-open="{{ $row['investment']->id }}"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>Ver histórico</button>
+                        {{-- Porta de entrada do histórico completo (paginado, com
+                             filtro por tipo de operação). Sem este link a página
+                             existia mas nada no app apontava para investments.show. --}}
+                        <a class="menu__item" role="menuitem" href="{{ route('investments.show', $row['investment']) }}"><i class="fa-solid fa-list" aria-hidden="true"></i>Histórico completo</a>
                         <button class="menu__item" type="button" role="menuitem" data-modal-open="aporte" data-aporte-nome="{{ $row['investment']->name }}" data-aporte-url="{{ route('investments.operations.store', $row['investment']) }}" data-aporte-tipo="contribution"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i>Registrar aporte</button>
                         <button class="menu__item" type="button" role="menuitem" data-modal-open="aporte" data-aporte-nome="{{ $row['investment']->name }}" data-aporte-url="{{ route('investments.operations.store', $row['investment']) }}" data-aporte-tipo="withdrawal"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i>Registrar resgate</button>
                         <a class="menu__item menu__item--sep" role="menuitem" href="{{ route('dashboard', array_merge($filters, ['edit_investment' => $row['investment']->id])) }}#investimentos"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i>Editar aplicação</a>

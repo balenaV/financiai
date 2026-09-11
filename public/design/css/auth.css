@@ -365,13 +365,11 @@
 
 .mfa-form { display: grid; gap: 16px; }
 
-.input--code {
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: 0.3em;
-  text-align: center;
-  padding: 14px 15px;
-}
+/* .input--code vive em mfa.css, que é carregado depois deste arquivo e, por
+   cascata, já vencia esta regra em toda tela onde a classe aparece (o desafio
+   de dois fatores do login). Manter as duas definições, com valores
+   divergentes, só criava uma classe com dois donos: quem editasse aqui não
+   veria efeito nenhum. */
 
 .input--recovery {
   font-size: 17px;

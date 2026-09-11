@@ -226,3 +226,53 @@
 .report-detail__row--head a:hover { color: var(--fg); }
 .report-detail__row--head a i { font-size: 9px; opacity: 0.55; }
 .report-detail__row--head a.is-right { justify-content: flex-end; }
+
+/* ---------------------------------------------------------------------------
+   Toasts de sucesso/erro
+
+   O bloco de toast dos layouts vinha do sistema antigo e era montado só com
+   utilitários do Tailwind (fixed, rounded-xl, bg-accent-50, shadow-lg...).
+   Nenhum desses layouts carrega o Tailwind — só o pacote public/design/css —
+   então as classes não existiam e o toast perdia até o position: fixed:
+   aparecia como texto solto no fluxo do documento. Como praticamente toda
+   ação de escrita do app redireciona com ->with('success'|'error'), era a
+   mensagem mais vista do sistema e a menos apresentável.
+
+   Segue a linguagem do .alert (mfa.css), acrescentando o sombreado duro dos
+   elementos flutuantes (.dropdown__menu).
+   -------------------------------------------------------------------------- */
+.toast-stack {
+  position: fixed;
+  top: 78px;
+  right: 18px;
+  z-index: 70;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 36px));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 15px;
+  border: 1.5px solid var(--hard);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 4px 4px 0 var(--hard);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--fg);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.toast i { margin-top: 2px; font-size: 13px; }
+.toast--success i { color: var(--accent); }
+.toast--error i { color: var(--danger); }
+.toast--error { border-color: var(--danger); box-shadow: 4px 4px 0 var(--danger); }
+
+.toast.is-leaving { opacity: 0; transform: translateX(8px); }
+
+@media (max-width: 640px) {
+  .toast-stack { top: auto; bottom: 18px; right: 12px; left: 12px; width: auto; }
+}

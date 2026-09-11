@@ -119,6 +119,12 @@ class DashboardController extends Controller
             // Provedor a oferecer no re-consentimento quando a conta não tem
             // senha utilizável (login social) — ver ReauthenticationService.
             'reauthProvider' => app(ReauthenticationService::class)->availableProvider($request->user()),
+            // Lembretes reais gravados por finance:send-reminders. O sino só
+            // mostrava contadores calculados na hora e nunca lia estas linhas,
+            // então o aviso individual ("Parcela 3 vence em...") não chegava a
+            // lugar nenhum da interface.
+            'unreadNotifications' => $request->user()->unreadNotifications()->latest()->limit(5)->get(),
+            'unreadNotificationCount' => $request->user()->unreadNotifications()->count(),
             'editAccount' => $editAccount,
             'editCard' => $editCard,
             'editTransaction' => $editTransaction,
