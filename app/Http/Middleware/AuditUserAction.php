@@ -17,6 +17,7 @@ class AuditUserAction
             AuditLog::create([
                 'user_id' => $request->user()->id,
                 'event' => $this->event($request),
+                'category' => in_array($response->getStatusCode(), [401, 403, 429], true) ? 'alerta' : 'alteracao',
                 'route' => $request->route()?->getName(),
                 'method' => $request->method(),
                 'ip_address' => $request->ip(),

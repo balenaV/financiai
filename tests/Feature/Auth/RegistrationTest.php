@@ -33,10 +33,30 @@ class RegistrationTest extends TestCase
         ]);
 
         $this->assertAuthenticated();
-        $response->assertRedirect(route('dashboard', absolute: false));
+        $response->assertRedirect(route('verification.notice'));
+        $response->assertSessionHas('registered', true);
         $this->assertDatabaseHas('user_settings', ['user_id' => auth()->id()]);
         Notification::assertSentTo(User::whereEmail('test@example.com')->firstOrFail(), VerifyEmail::class);
         $this->assertDatabaseHas('categories', ['user_id' => auth()->id(), 'name' => 'Salário']);
+    }
+
+    public function test_registration_redirects_to_verify_email_screen_with_friendly_message(): void
+    {
+        Notification::fake();
+
+        $this->post('/register', [
+            'name' => 'Test User',
+            'email' => 'confirma@example.com',
+            'password' => 'SenhaForte@123',
+            'password_confirmation' => 'SenhaForte@123',
+            'terms' => '1',
+        ]);
+
+        $response = $this->get(route('verification.notice'));
+
+        $response->assertOk();
+        $response->assertSee('Conta criada com sucesso!');
+        $response->assertSee('confirma@example.com');
     }
 
     public function test_registration_requires_accepting_the_terms(): void
@@ -92,7 +112,7 @@ class RegistrationTest extends TestCase
         ]);
 
         $this->assertAuthenticated();
-        $response->assertRedirect(route('dashboard', absolute: false));
+        $response->assertRedirect(route('verification.notice'));
     }
 
     public function test_registration_can_be_disabled(): void

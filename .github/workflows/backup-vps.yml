@@ -10,12 +10,19 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Dump database and download backup
+      - name: Compute backup filename
+        id: vars
+        run: echo "filename=financiai-prod-$(date +%Y%m%d-%H%M%S).dump.gpg" >> "$GITHUB_OUTPUT"
+
+      - name: Dump, encrypt and prune on the VPS
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
           username: deploy
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: ${{ secrets.VPS_HOST_FINGERPRINT }}
+          envs: FILENAME,BACKUP_ENCRYPTION_KEY
+          envs_format: "export {NAME}='{VALUE}'"
           script: |
             set -e
             cd /var/www/financiai
@@ -23,28 +30,43 @@ jobs:
             source .env
             set +a
             mkdir -p /var/www/backups
-            FILENAME="financiai-prod-$(date +%Y%m%d-%H%M%S).dump"
+            RAW="/var/www/backups/${FILENAME%.gpg}"
             docker compose -p financiai-prod -f compose.prod.yaml exec -T db \
               pg_dump -U "$DB_USERNAME" -d "$DB_DATABASE" --format=custom --no-owner --no-acl \
-              > "/var/www/backups/$FILENAME"
-            # mantém só os 10 backups mais recentes
-            ls -t /var/www/backups/*.dump | tail -n +11 | xargs -r rm --
+              > "$RAW"
+            echo "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --symmetric --cipher-algo AES256 \
+              --passphrase-fd 0 --output "/var/www/backups/$FILENAME" "$RAW"
+            rm -f "$RAW"
+            # mantém só os 10 backups criptografados mais recentes
+            ls -t /var/www/backups/*.dump.gpg | tail -n +11 | xargs -r rm --
+        env:
+          FILENAME: ${{ steps.vars.outputs.filename }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
 
-      - name: Copy backup file to runner
+      - name: Pin VPS host key
+        env:
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_KNOWN_HOSTS" >> ~/.ssh/known_hosts
+
+      - name: Copy encrypted backup to runner
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          FILENAME: ${{ steps.vars.outputs.filename }}
         run: |
           set -e
           mkdir -p downloaded-backup
           echo "$VPS_SSH_KEY" > deploy_key
           chmod 600 deploy_key
-          scp -o StrictHostKeyChecking=no -i deploy_key \
-            deploy@"$VPS_HOST":/var/www/backups/*.dump ./downloaded-backup/
+          scp -i deploy_key \
+            deploy@"$VPS_HOST":"/var/www/backups/$FILENAME" ./downloaded-backup/
           rm -f deploy_key
 
       - uses: actions/upload-artifact@v4
         with:
           name: financiai-backup-${{ github.run_id }}
-          path: downloaded-backup/*.dump
-          retention-days: 30
+          path: downloaded-backup/${{ steps.vars.outputs.filename }}
+          retention-days: 7

@@ -3,8 +3,14 @@
     // A maioria das páginas que este layout servia virou aba do dashboard novo
     // (Prompt 6) — só sobram aqui detalhes/edições sem equivalente na aba
     // ainda (conta, investimento, cartão, fatura aberta, relatórios
-    // detalhados, histórico de segurança), sempre acessados por link direto,
-    // nunca por essa barra. Por isso a navegação encolheu pra só isto.
+    // detalhados, notificações), acessados por link direto, nunca por essa
+    // barra. Por isso a navegação encolheu pra só isto.
+    //
+    // Os links de entrada vivem no dashboard: "Extrato completo" no histórico
+    // da conta, "Histórico completo" no menu do investimento, "Abrir página do
+    // cartão" no menu do cartão e "Ver todas" no sino de notificações. Se algum
+    // deles sair, a página correspondente volta a ficar inalcançável — foi
+    // exatamente o que uma auditoria de consistência pegou aqui.
     $nav = [
         ['route' => 'dashboard', 'match' => 'dashboard', 'label' => 'Visão geral', 'icon' => 'fa-chart-pie'],
         ['route' => 'reports.index', 'match' => 'reports.*', 'label' => 'Relatórios', 'icon' => 'fa-chart-column'],

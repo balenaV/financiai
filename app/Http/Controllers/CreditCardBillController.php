@@ -55,7 +55,17 @@ class CreditCardBillController extends Controller
         $this->authorize('update', $bill);
         $service->updateOpenBill($request->user(), $bill, $request->validated());
 
-        return to_route('credit-cards.show', $bill->credit_card_id)->with('success', 'Fatura atualizada.');
+        // O modal novo (dashboard, aba Cartões) e a página cheia antiga
+        // (credit-cards.show → bill-form) postam para a mesma rota. Quem veio
+        // da página cheia volta para ela — perder esse contexto seria uma
+        // regressão para quem ainda chega por um link de lembrete de fatura
+        // (ver App\Console\Commands\SendFinancialReminders). Quem veio do
+        // modal cai na aba Cartões do painel, que é onde ele já estava.
+        if (str_contains((string) $request->headers->get('referer'), '/credit-cards/')) {
+            return redirect()->route('credit-cards.show', $bill->credit_card_id)->with('success', 'Fatura atualizada.');
+        }
+
+        return redirect(route('dashboard').'#cartoes')->with('success', 'Fatura atualizada.');
     }
 
     public function destroy(CreditCardBill $bill): RedirectResponse

@@ -21,7 +21,7 @@ test('recuperação de senha e cadastro são acessíveis', async ({ page }) => {
     await page.goto('/login');
     await page.getByRole('link', { name: 'Esqueci minha senha' }).click();
     await expect(page).toHaveURL(/forgot-password/);
-    await expect(page.getByLabel('E-mail')).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'E-mail da conta' })).toBeVisible();
 
     await page.goto('/register');
     await expect(page.getByRole('heading', { name: 'Comece a organizar hoje' })).toBeVisible();

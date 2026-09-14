@@ -86,31 +86,67 @@ class CreditCardService
         });
     }
 
+    /**
+     * O vencimento e o ajuste manual valem só para esta fatura — não mexem em
+     * closing_day/due_day do cartão, que continuam regendo as próximas.
+     */
     public function updateOpenBill(User $user, CreditCardBill $bill, array $data): CreditCardBill
     {
-        if ($bill->user_id !== $user->id || ! $this->canEdit($bill)) {
+        if ($bill->user_id !== $user->id) {
             throw ValidationException::withMessages([
                 'bill' => 'Somente faturas ainda não fechadas podem ser editadas.',
             ]);
         }
 
-        $normalizedTotal = Money::normalize($data['total_amount']);
-        $registeredPurchases = bcadd('0', (string) $bill->purchases()
-            ->where('status', '!=', TransactionStatus::Cancelled->value)
-            ->sum('amount'), 2);
+        // Somar as compras e regravar o total é read-modify-write: sem a
+        // transação e o lock, uma compra concorrente (que passa por
+        // adjustBillTotal, este sim já travado) entra entre a leitura e a
+        // escrita e some do total da fatura de forma permanente — achado M3.
+        // O canEdit também é reavaliado sobre a instância travada, senão uma
+        // fatura paga em paralelo ainda poderia ser reescrita aqui.
+        return DB::transaction(function () use ($bill, $data): CreditCardBill {
+            $locked = CreditCardBill::query()->lockForUpdate()->findOrFail($bill->getKey());
 
-        if (bccomp($normalizedTotal, $registeredPurchases, 2) < 0) {
-            throw ValidationException::withMessages([
-                'total_amount' => 'O total não pode ser menor que as compras já vinculadas à fatura.',
+            if (! $this->canEdit($locked)) {
+                throw ValidationException::withMessages([
+                    'bill' => 'Somente faturas ainda não fechadas podem ser editadas.',
+                ]);
+            }
+
+            $registeredPurchases = bcadd('0', (string) $locked->purchases()
+                ->where('status', '!=', TransactionStatus::Cancelled->value)
+                ->sum('amount'), 2);
+
+            // array_key_exists (não filled()) para distinguir "campo não veio na
+            // requisição" (preserva o ajuste atual da fatura — ex.: um PATCH
+            // parcial via API) de "campo veio vazio" (usuário limpou o valor de
+            // propósito, zera o ajuste). O form da tela sempre envia os dois.
+            if (array_key_exists('adjustment_amount', $data)) {
+                $adjustmentAmount = filled($data['adjustment_amount']) ? Money::normalize($data['adjustment_amount']) : '0.00';
+                if (($data['adjustment_type'] ?? 'acrescimo') === 'desconto') {
+                    $adjustmentAmount = bcmul($adjustmentAmount, '-1', 2);
+                }
+            } else {
+                $adjustmentAmount = (string) $locked->adjustment_amount;
+            }
+
+            $normalizedTotal = bcadd($registeredPurchases, $adjustmentAmount, 2);
+
+            if (bccomp($normalizedTotal, '0', 2) < 0) {
+                throw ValidationException::withMessages([
+                    'adjustment_amount' => 'O desconto não pode deixar a fatura negativa.',
+                ]);
+            }
+
+            $locked->update([
+                'total_amount' => $normalizedTotal,
+                'adjustment_amount' => $adjustmentAmount,
+                'adjustment_reason' => array_key_exists('adjustment_reason', $data) ? $data['adjustment_reason'] : $locked->adjustment_reason,
+                'due_date' => filled($data['due_date'] ?? null) ? Carbon::parse($data['due_date']) : $locked->due_date,
             ]);
-        }
 
-        $bill->update([
-            'total_amount' => $normalizedTotal,
-            'notes' => $data['notes'] ?? null,
-        ]);
-
-        return $bill->refresh();
+            return $locked->refresh();
+        });
     }
 
     public function canEdit(CreditCardBill $bill, ?CarbonInterface $today = null): bool

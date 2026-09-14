@@ -13,6 +13,8 @@
 <link rel="stylesheet" href="{{ asset('design/css/tokens.css') }}">
 <link rel="stylesheet" href="{{ asset('design/css/base.css') }}">
 <link rel="stylesheet" href="{{ asset('design/css/dashboard.css') }}">
+<link rel="stylesheet" href="{{ asset('design/css/mfa.css') }}">
+<link rel="stylesheet" href="{{ asset('design/css/fase5.css') }}">
 <link rel="stylesheet" href="{{ asset('design/css/app-additions.css') }}">
 <script>
     try { localStorage.setItem('financiai:theme', document.documentElement.getAttribute('data-theme')); } catch (e) {}
@@ -22,9 +24,30 @@
 
 {{ $slot }}
 
+<div id="toast-container" class="toast-stack" aria-live="polite">
+    @foreach(['success', 'error'] as $kind)
+        @if(session($kind))
+            <div class="toast toast--{{ $kind }}" role="status">
+                <i class="fa-solid {{ $kind === 'success' ? 'fa-circle-check' : 'fa-circle-exclamation' }}" aria-hidden="true"></i>
+                <span>{{ session($kind) }}</span>
+            </div>
+        @endif
+    @endforeach
+</div>
+
 <script src="{{ asset('design/js/theme.js') }}"></script>
 <script src="{{ asset('design/js/dashboard.js') }}"></script>
 <script src="{{ asset('design/js/dashboard-settings-sync.js') }}"></script>
 <script src="{{ asset('design/js/form-widgets-sync.js') }}"></script>
+<script src="{{ asset('design/js/mfa.js') }}"></script>
+<script src="{{ asset('design/js/mfa-reauth-sync.js') }}"></script>
+<script>
+    setTimeout(() => {
+        document.querySelectorAll('#toast-container .toast').forEach((el) => {
+            el.classList.add('is-leaving');
+            setTimeout(() => el.remove(), 250);
+        });
+    }, 4500);
+</script>
 </body>
 </html>

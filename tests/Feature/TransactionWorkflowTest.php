@@ -58,6 +58,33 @@ class TransactionWorkflowTest extends TestCase
         $this->assertNotNull($recurring->first()->recurrence_group_id);
     }
 
+    public function test_subscription_saves_without_a_separate_recurrence_start_date(): void
+    {
+        // Reproduz o modal "Nova assinatura" (dashboard.blade.php): ele só
+        // envia competence_date + recurrence_count, sem recurrence_start_date
+        // — nenhuma tela do produto tem esse campo. A regra
+        // required_if:recurrence_count,2..12 bloqueava toda assinatura nova.
+        [$user, $account] = $this->userAndAccount();
+        $category = $user->categories()->where('name', 'Assinaturas')->first();
+
+        $response = $this->actingAs($user)->post(route('transactions.store'), [
+            'type' => 'expense',
+            'status' => 'planned',
+            'payment_channel' => 'account',
+            'account_id' => $account->id,
+            'recurrence_count' => 12,
+            'description' => 'Streaming',
+            'amount' => '39,90',
+            'category_id' => $category->id,
+            'competence_date' => today()->addMonth()->startOfMonth()->toDateString(),
+        ]);
+
+        $response->assertSessionDoesntHaveErrors('recurrence_start_date');
+        $response->assertRedirect(route('dashboard').'#transacoes');
+        $this->assertDatabaseHas('transactions', ['user_id' => $user->id, 'description' => 'Streaming']);
+        $this->assertSame(12, $user->transactions()->where('description', 'Streaming')->count());
+    }
+
     public function test_transfer_rejects_same_account(): void
     {
         [$user, $account] = $this->userAndAccount();

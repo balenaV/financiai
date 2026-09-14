@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Models\User;
+use App\Support\SecurityAudit;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -47,7 +49,7 @@ class LoginRequest extends FormRequest
     {
         $this->ensureIsNotRateLimited();
 
-        if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
+        if (! Auth::validate($this->only('email', 'password'))) {
             RateLimiter::hit($this->throttleKey());
 
             throw ValidationException::withMessages([
@@ -56,6 +58,16 @@ class LoginRequest extends FormRequest
         }
 
         RateLimiter::clear($this->throttleKey());
+    }
+
+    /**
+     * Usuário validado pela última chamada a authenticate() — ainda não
+     * logado, para o controller decidir entre completar o login direto ou
+     * desviar para o desafio de dois fatores.
+     */
+    public function authenticatedUser(): User
+    {
+        return Auth::getLastAttempted();
     }
 
     /**
@@ -70,6 +82,11 @@ class LoginRequest extends FormRequest
         }
 
         event(new Lockout($this));
+
+        $targetUser = User::where('email', $this->string('email'))->first();
+        if ($targetUser) {
+            SecurityAudit::log($targetUser, 'alerta', 'Tentativa de login bloqueada', $this);
+        }
 
         $seconds = RateLimiter::availableIn($this->throttleKey());
 

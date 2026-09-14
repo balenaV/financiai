@@ -59,7 +59,11 @@ class TransactionRequest extends FormRequest
             'installment_count' => ['nullable', 'required_if:payment_mode,installment', 'integer', 'min:2', 'max:240'],
             'first_installment_date' => ['nullable', 'required_if:payment_mode,installment', 'date'],
             'recurrence_count' => ['nullable', 'integer', 'min:1', 'max:120'],
-            'recurrence_start_date' => ['nullable', 'required_if:recurrence_count,2,3,4,5,6,7,8,9,10,11,12', 'date'],
+            // Sem tela no produto que colete essa data separada da
+            // competence_date — TransactionService::create já cai para
+            // competence_date quando ausente (era exigido sem nunca ser
+            // enviado, o que travava toda assinatura nova no modal).
+            'recurrence_start_date' => ['nullable', 'date'],
             'update_future' => ['sometimes', 'boolean'],
         ];
     }

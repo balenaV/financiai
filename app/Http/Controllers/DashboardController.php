@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\BudgetService;
 use App\Services\DashboardService;
+use App\Services\ReauthenticationService;
 use App\Services\TransactionService;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -38,6 +39,11 @@ class DashboardController extends Controller
             'tx_account' => ['nullable', 'integer'],
             'tx_status' => ['nullable', 'string', 'in:completed,pending,cancelled'],
             'tx_page' => ['nullable', 'integer', 'min:1'],
+            'rep_sort' => ['nullable', 'string', 'in:data,desc,categoria,conta,valor'],
+            'rep_dir' => ['nullable', 'string', 'in:asc,desc'],
+            'rep_page' => ['nullable', 'integer', 'min:1'],
+            'sec_type' => ['nullable', 'string', 'in:acesso,alteracao,alerta'],
+            'sec_page' => ['nullable', 'integer', 'min:1'],
         ]);
 
         if (isset($filters['account_id'])) {
@@ -95,9 +101,30 @@ class DashboardController extends Controller
             ->where('month', $budgetMonth)->where('year', $budgetYear)->get()
             ->map(fn ($budget) => ['budget' => $budget, 'metrics' => $budgetService->metrics($budget)]);
 
+        $activityCounts = [
+            'todos' => $request->user()->auditLogs()->count(),
+            'acesso' => $request->user()->auditLogs()->where('category', 'acesso')->count(),
+            'alteracao' => $request->user()->auditLogs()->where('category', 'alteracao')->count(),
+            'alerta' => $request->user()->auditLogs()->where('category', 'alerta')->count(),
+        ];
+        $activityPage = $request->user()->auditLogs()
+            ->when($filters['sec_type'] ?? null, fn ($q, $type) => $q->where('category', $type))
+            ->latest()
+            ->paginate(6, pageName: 'sec_page')
+            ->withQueryString();
+
         return view('dashboard', [
             'dashboard' => $data,
             'filters' => $filters,
+            // Provedor a oferecer no re-consentimento quando a conta não tem
+            // senha utilizável (login social) — ver ReauthenticationService.
+            'reauthProvider' => app(ReauthenticationService::class)->availableProvider($request->user()),
+            // Lembretes reais gravados por finance:send-reminders. O sino só
+            // mostrava contadores calculados na hora e nunca lia estas linhas,
+            // então o aviso individual ("Parcela 3 vence em...") não chegava a
+            // lugar nenhum da interface.
+            'unreadNotifications' => $request->user()->unreadNotifications()->latest()->limit(5)->get(),
+            'unreadNotificationCount' => $request->user()->unreadNotifications()->count(),
             'editAccount' => $editAccount,
             'editCard' => $editCard,
             'editTransaction' => $editTransaction,
@@ -110,6 +137,9 @@ class DashboardController extends Controller
             'budgetMonth' => $budgetMonth,
             'budgetYear' => $budgetYear,
             'budgetsPage' => $budgetsPage,
+            'activityPage' => $activityPage,
+            'activityCounts' => $activityCounts,
+            'activityType' => $filters['sec_type'] ?? 'todos',
             'categories' => $request->user()->categories()->where('active', true)->orderBy('name')->get(),
             'accountTypeTiles' => [
                 ['key' => 'corrente', 'type' => 'checking', 'icon' => 'bank', 'iconClass' => 'fa-solid fa-building-columns', 'label' => 'Conta corrente'],

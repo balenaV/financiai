@@ -16,6 +16,8 @@ class ProfileUpdateRequest extends FormRequest
      */
     public function rules(): array
     {
+        $emailChanged = $this->input('email') !== $this->user()->email;
+
         return [
             'name' => ['required', 'string', 'max:255'],
             'email' => [
@@ -26,6 +28,7 @@ class ProfileUpdateRequest extends FormRequest
                 'max:255',
                 Rule::unique(User::class)->ignore($this->user()->id),
             ],
+            'current_password' => [Rule::requiredIf($emailChanged), 'current_password'],
             'avatar' => ['nullable', 'image', 'mimes:jpeg,png', 'max:5120'],
             'remove_avatar' => ['nullable', 'boolean'],
         ];

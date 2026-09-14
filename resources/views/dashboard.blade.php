@@ -8,6 +8,7 @@
     $hide = (bool) $userSettings->hide_values;
     $summary = $dashboard['summary'];
     $charts = $dashboard['charts'];
+    $creditCardService = app(\App\Services\CreditCardService::class);
 
     $activeSectionKeys = count($userSettings->sections ?? []) === 5 ? $userSettings->sections : DashboardSection::defaults();
     $activeSections = collect($activeSectionKeys)->map(fn ($key) => DashboardSection::tryFrom($key))->filter()->values();
@@ -25,8 +26,12 @@
     $maxBar = max(1, ...array_map('floatval', array_merge($charts['income'], $charts['expense'])));
     $bars = collect($charts['labels'])->map(fn ($label, $i) => [
         'label' => $label,
+        'month_full' => $charts['labels_full'][$i],
         'rec' => max(4, round(((float) $charts['income'][$i]) / $maxBar * 100)),
         'desp' => max(4, round(((float) $charts['expense'][$i]) / $maxBar * 100)),
+        'income' => $charts['income'][$i],
+        'expense' => $charts['expense'][$i],
+        'result' => bcsub($charts['income'][$i], $charts['expense'][$i], 2),
     ]);
 
     $topCategories = collect($charts['expense_categories']['labels'])
@@ -167,7 +172,7 @@
         <div class="topbar__actions">
           <button class="icon-btn" type="button" data-notif-toggle aria-label="Notificações" aria-expanded="false">
             <i class="fa-regular fa-bell" aria-hidden="true"></i>
-            @if($summary['overdue_count'] + $summary['overdue_bill_count'] + $summary['upcoming_count'] > 0)
+            @if($summary['overdue_count'] + $summary['overdue_bill_count'] + $summary['upcoming_count'] + $unreadNotificationCount > 0)
               <span class="icon-btn__dot"></span>
             @endif
           </button>
@@ -178,9 +183,27 @@
           <div class="notif-panel" data-notif-panel hidden>
             <div class="notif-panel__head">
               <span class="notif-panel__title">Notificações</span>
-              <span class="notif-panel__count">{{ $summary['overdue_count'] + $summary['overdue_bill_count'] + ($summary['upcoming_count'] > 0 ? 1 : 0) }} pendências</span>
+              {{-- Único ponto de entrada de /notifications no app. --}}
+              <a class="link-sm" href="{{ route('notifications.index') }}">Ver todas</a>
+              <span class="notif-panel__count">{{ $summary['overdue_count'] + $summary['overdue_bill_count'] + ($summary['upcoming_count'] > 0 ? 1 : 0) + $unreadNotificationCount }} pendências</span>
             </div>
             <div>
+              {{-- Lembretes individuais gerados pelo comando agendado
+                   finance:send-reminders. Antes só existiam em /notifications,
+                   que nenhuma tela do app alcançava. --}}
+              @foreach($unreadNotifications as $notification)
+                <form method="POST" action="{{ route('notifications.read', $notification->id) }}">
+                  @csrf
+                  @method('PATCH')
+                  <button class="notif" type="submit">
+                    <span class="notif__icon"><i class="fa-regular fa-bell" aria-hidden="true"></i></span>
+                    <span class="notif__body">
+                      <span class="notif__title">{{ $notification->data['title'] ?? 'Lembrete financeiro' }}</span>
+                      <span class="notif__text">{{ $notification->data['message'] ?? $notification->created_at->diffForHumans() }}</span>
+                    </span>
+                  </button>
+                </form>
+              @endforeach
               @if($summary['overdue_bill_count'] > 0)
                 <button class="notif" type="button">
                   <span class="notif__icon notif__icon--fg"><i class="fa-regular fa-credit-card" aria-hidden="true"></i></span>
@@ -208,11 +231,18 @@
                   </span>
                 </button>
               @endif
-              @if($summary['overdue_count'] === 0 && $summary['overdue_bill_count'] === 0 && $summary['upcoming_count'] === 0)
+              @if($summary['overdue_count'] === 0 && $summary['overdue_bill_count'] === 0 && $summary['upcoming_count'] === 0 && $unreadNotifications->isEmpty())
                 <p style="padding: 16px; font-size: 14px; color: var(--muted);">Nenhuma pendência por aqui.</p>
               @endif
             </div>
-            <button class="notif-panel__foot" type="button" data-notif-read>Marcar todas como lidas</button>
+            {{-- Antes era um type="button" que só escondia o painel e apagava o
+                 pontinho: as notificações continuavam não lidas no banco e
+                 voltavam no próximo carregamento. Agora é um envio de verdade. --}}
+            <form method="POST" action="{{ route('notifications.read-all') }}">
+              @csrf
+              @method('PATCH')
+              <button class="notif-panel__foot" type="submit" data-notif-read>Marcar todas como lidas</button>
+            </form>
           </div>
         </div>
       </div>
@@ -287,8 +317,17 @@
               </div>
               <div class="bars">
                 @foreach($bars as $bar)
-                  <div class="bars__col">
-                    <div class="bars__pair"><span class="bar bar--rec" style="height:{{ $bar['rec'] }}%"></span><span class="bar bar--desp" style="height:{{ $bar['desp'] }}%"></span></div>
+                  <div class="bars__col chart-col" data-chart-col data-hover="false">
+                    <div class="bars__pair">
+                      <span class="bar bar--rec chart-bar" data-kind="rec" data-dim="false" style="height:{{ $bar['rec'] }}%"></span>
+                      <span class="bar bar--desp chart-bar" data-kind="desp" data-dim="false" style="height:{{ $bar['desp'] }}%"></span>
+                      <span class="chart-tip" role="tooltip">
+                        <span class="chart-tip__month">{{ $bar['month_full'] }}</span>
+                        <span class="chart-tip__row" data-kind="rec"><span class="chart-tip__key"><span class="chart-tip__dot"></span>Receitas</span><span class="chart-tip__val" data-money>{{ Money::format($bar['income'], $hide) }}</span></span>
+                        <span class="chart-tip__row" data-kind="desp"><span class="chart-tip__key"><span class="chart-tip__dot chart-tip__dot--exp"></span>Despesas</span><span class="chart-tip__val" data-money>{{ Money::format($bar['expense'], $hide) }}</span></span>
+                        <span class="chart-tip__row chart-tip__row--total"><span class="chart-tip__key">Sobrou</span><span class="chart-tip__val" data-money>{{ Money::format($bar['result'], $hide) }}</span></span>
+                      </span>
+                    </div>
                     <span class="bars__label">{{ $bar['label'] }}</span>
                   </div>
                 @endforeach
@@ -665,6 +704,12 @@
                     <span class="account-card__figure-label">Atual</span>
                     <span class="account-card__figure-value" data-money>{{ Money::format($row['current'], $hide) }}</span>
                   </span>
+                  {{-- Porta de entrada do extrato completo (paginado, com busca
+                       e filtro por tipo). Sem este link a página existia mas era
+                       inalcançável: nada no app apontava para accounts.show. --}}
+                  <a class="btn-outline-hard btn-outline--sm" href="{{ route('accounts.show', $row['account']) }}">
+                    <i class="fa-solid fa-list" aria-hidden="true"></i>Extrato completo
+                  </a>
                   <button class="btn-icon btn-icon--sm" type="button" aria-label="Fechar histórico" data-account-close><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
                 </span>
               </div>
@@ -748,6 +793,11 @@
                             <div class="menu__list" role="menu" hidden data-menu-list>
                               <button class="menu__item" type="button" role="menuitem" data-card-invoices="{{ $row['card']->id }}"><i class="fa-solid fa-receipt" aria-hidden="true"></i>Ver faturas</button>
                               <button class="menu__item" type="button" role="menuitem" data-card-pay="{{ $row['card']->id }}"><i class="fa-solid fa-money-check-dollar" aria-hidden="true"></i>Registrar pagamento</button>
+                              {{-- Página do cartão: é para onde o lembrete de
+                                   fatura aponta e de onde sai o formulário de
+                                   fatura em tela cheia. Nada no app linkava
+                                   para cá, então essa jornada ficava morta. --}}
+                              <a class="menu__item" role="menuitem" href="{{ route('credit-cards.show', $row['card']) }}"><i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i>Abrir página do cartão</a>
                               <a class="menu__item menu__item--sep" role="menuitem" href="{{ route('dashboard', array_merge($filters, ['edit_card' => $row['card']->id])) }}#cartoes"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i>Editar cartão</a>
                             </div>
                           </div>
@@ -799,6 +849,7 @@
                       <span class="invoices__total" data-money data-invoice-total>R$ 0,00</span>
                       <span class="badge-state" data-invoice-state><i class="fa-regular fa-clock" aria-hidden="true"></i>Em aberto</span>
                     </span>
+                    <button class="btn-outline btn-outline--sm" type="button" data-invoice-edit><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i>Editar fatura</button>
                     <button class="btn-primary btn-primary--sm" type="button" data-invoice-pay><i class="fa-solid fa-money-check-dollar" aria-hidden="true"></i>Registrar pagamento</button>
                   </div>
                   @forelse($row['bills'] as $i => $bill)
@@ -807,10 +858,16 @@
                          data-bill-id="{{ $bill->id }}"
                          data-month="{{ ucfirst($bill->reference_month->translatedFormat('F Y')) }}"
                          data-due="Vence em {{ $bill->due_date->format('d/m/Y') }}"
+                         data-due-date="{{ $bill->due_date->toDateString() }}"
                          data-count="{{ $bill->purchases->count() }} {{ Str::plural('lançamento', $bill->purchases->count()) }}"
                          data-total="{{ $bill->total_amount }}"
                          data-paid="{{ $bill->status->value === 'paid' ? '1' : '0' }}"
-                         data-pay-url="{{ route('credit-card-bills.pay', $bill) }}">
+                         data-can-edit="{{ $creditCardService->canEdit($bill) ? '1' : '0' }}"
+                         data-adjustment-type="{{ bccomp($bill->adjustment_amount, '0', 2) < 0 ? 'desconto' : 'acrescimo' }}"
+                         data-adjustment-amount="{{ ltrim($bill->adjustment_amount, '-') }}"
+                         data-adjustment-reason="{{ $bill->adjustment_reason }}"
+                         data-pay-url="{{ route('credit-card-bills.pay', $bill) }}"
+                         data-edit-url="{{ route('credit-card-bills.update', $bill) }}">
                       <div data-invoice-rows>
                         @forelse($bill->purchases as $purchase)
                           <div class="invoices__row">
@@ -1125,6 +1182,10 @@
                       <button class="btn-icon btn-icon--sm" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Ações" data-menu-btn><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></button>
                       <div class="menu__list" role="menu" hidden data-menu-list>
                         <button class="menu__item" type="button" role="menuitem" data-invest-open="{{ $row['investment']->id }}"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>Ver histórico</button>
+                        {{-- Porta de entrada do histórico completo (paginado, com
+                             filtro por tipo de operação). Sem este link a página
+                             existia mas nada no app apontava para investments.show. --}}
+                        <a class="menu__item" role="menuitem" href="{{ route('investments.show', $row['investment']) }}"><i class="fa-solid fa-list" aria-hidden="true"></i>Histórico completo</a>
                         <button class="menu__item" type="button" role="menuitem" data-modal-open="aporte" data-aporte-nome="{{ $row['investment']->name }}" data-aporte-url="{{ route('investments.operations.store', $row['investment']) }}" data-aporte-tipo="contribution"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i>Registrar aporte</button>
                         <button class="menu__item" type="button" role="menuitem" data-modal-open="aporte" data-aporte-nome="{{ $row['investment']->name }}" data-aporte-url="{{ route('investments.operations.store', $row['investment']) }}" data-aporte-tipo="withdrawal"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i>Registrar resgate</button>
                         <a class="menu__item menu__item--sep" role="menuitem" href="{{ route('dashboard', array_merge($filters, ['edit_investment' => $row['investment']->id])) }}#investimentos"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i>Editar aplicação</a>
@@ -1286,6 +1347,26 @@
               $repMaxCategory = max(1, ...array_map('floatval', $repCategoryValues->all() ?: [0]));
               $repCategoryColors = $dashboard['categories_overview']->pluck('color', 'name');
               $repCategoryIcons = $dashboard['categories_overview']->pluck('icon', 'name');
+              $repDeltas = $dashboard['report_deltas'];
+              $repDeltaIcon = fn ($state) => match ($state) {
+                  'alta' => 'fa-solid fa-arrow-trend-up',
+                  'baixa' => 'fa-solid fa-arrow-trend-down',
+                  default => 'fa-solid fa-equals',
+              };
+              $repDeltaLabel = function ($delta) {
+                  if ($delta['state'] === 'estavel') return 'Estável vs. mês anterior';
+                  $sign = $delta['state'] === 'alta' ? '+' : '−';
+                  $pct = $delta['percentage'] === null ? '' : $sign.number_format(abs($delta['percentage']), 1, ',', '.').'% ';
+                  return $pct.'vs. mês anterior';
+              };
+              $repDetail = $dashboard['report_detail'];
+              $repPaginator = $repDetail['paginator'];
+              $repSortUrl = fn ($column) => route('dashboard', array_merge($filters, [
+                  'rep_sort' => $column,
+                  'rep_dir' => ($repDetail['sort'] === $column && $repDetail['dir'] === 'asc') ? 'desc' : 'asc',
+              ])).'#relatorios';
+              $repSortIcon = fn ($column) => $repDetail['sort'] !== $column ? 'fa-solid fa-sort' : ($repDetail['dir'] === 'asc' ? 'fa-solid fa-sort-up' : 'fa-solid fa-sort-down');
+              $repOpen = request()->hasAny(['rep_sort', 'rep_page']);
           @endphp
           <div class="filters" data-enter>
             <span class="page-bar__note">Últimos 6 meses · {{ $dashboard['period']['start']->translatedFormat('M/Y') }} a {{ $dashboard['period']['end']->translatedFormat('M/Y') }}</span>
@@ -1298,16 +1379,19 @@
               <div class="kpi__label"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i>Receitas no período</div>
               <div class="kpi__value is-positive" data-money>{{ Money::format($repIncomeTotal, $hide) }}</div>
               <div class="kpi__note">6 meses considerados</div>
+              <div class="kpi__delta"><i class="{{ $repDeltaIcon($repDeltas['income']['state']) }}" aria-hidden="true"></i>{{ $repDeltaLabel($repDeltas['income']) }}</div>
             </article>
             <article class="kpi" data-enter>
               <div class="kpi__label"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i>Despesas no período</div>
               <div class="kpi__value" data-money>{{ Money::format($repExpenseTotal, $hide) }}</div>
               <div class="kpi__note">Média de {{ Money::format(bcdiv($repExpenseTotal, '6', 2), $hide) }} por mês</div>
+              <div class="kpi__delta"><i class="{{ $repDeltaIcon($repDeltas['expense']['state']) }}" aria-hidden="true"></i>{{ $repDeltaLabel($repDeltas['expense']) }}</div>
             </article>
             <article class="kpi" data-enter>
               <div class="kpi__label"><i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>Resultado</div>
               <div class="kpi__value {{ bccomp($repResult, '0', 2) >= 0 ? 'is-positive' : 'is-negative' }}" data-money>{{ Money::format($repResult, $hide) }}</div>
               <div class="kpi__note">{{ Money::percentage($repResult, $repIncomeTotal) }}% das receitas sobraram</div>
+              <div class="kpi__delta"><i class="{{ $repDeltaIcon($repDeltas['result']['state']) }}" aria-hidden="true"></i>{{ $repDeltaLabel($repDeltas['result']) }}</div>
             </article>
           </div>
 
@@ -1348,6 +1432,53 @@
                 @endforeach
               </div>
             @endif
+          </section>
+
+          <section class="report-detail" data-enter>
+            <div class="report-detail__head">
+              <span>
+                <span class="report-detail__title">Lançamentos do recorte</span>
+                <span class="report-detail__sub">{{ $repPaginator->total() }} {{ $repPaginator->total() === 1 ? 'lançamento' : 'lançamentos' }} nos últimos 6 meses</span>
+              </span>
+              <a class="btn-outline btn-outline--sm" href="{{ $repOpen ? route('dashboard', array_diff_key($filters, ['rep_sort' => '', 'rep_dir' => '', 'rep_page' => ''])).'#relatorios' : route('dashboard', array_merge($filters, ['rep_sort' => $repDetail['sort'], 'rep_dir' => $repDetail['dir']])).'#relatorios' }}">
+                <i class="fa-solid {{ $repOpen ? 'fa-chevron-up' : 'fa-chevron-down' }}" aria-hidden="true"></i>{{ $repOpen ? 'Ocultar lançamentos' : 'Ver lançamentos' }}
+              </a>
+            </div>
+            <div class="report-detail__body" @unless($repOpen) hidden @endunless>
+              <div class="report-detail__row report-detail__row--head">
+                <a href="{{ $repSortUrl('data') }}"><span>Data</span><i class="{{ $repSortIcon('data') }}" aria-hidden="true"></i></a>
+                <a href="{{ $repSortUrl('desc') }}"><span>Descrição</span><i class="{{ $repSortIcon('desc') }}" aria-hidden="true"></i></a>
+                <a href="{{ $repSortUrl('categoria') }}"><span>Categoria</span><i class="{{ $repSortIcon('categoria') }}" aria-hidden="true"></i></a>
+                <a href="{{ $repSortUrl('conta') }}"><span>Conta</span><i class="{{ $repSortIcon('conta') }}" aria-hidden="true"></i></a>
+                <a class="is-right" href="{{ $repSortUrl('valor') }}"><span>Valor</span><i class="{{ $repSortIcon('valor') }}" aria-hidden="true"></i></a>
+              </div>
+              <div>
+                @foreach($repPaginator as $t)
+                  <div class="report-detail__row">
+                    <span class="report-detail__date">{{ $t->competence_date->format('d/m/Y') }}</span>
+                    <span class="report-detail__desc">{{ $t->description }}</span>
+                    <span>{{ $t->category?->name ?? '—' }}</span>
+                    <span>{{ $t->account?->name ?? $t->creditCard?->name ?? '—' }}</span>
+                    <span class="report-detail__value {{ $t->type->value === 'income' ? 'is-in' : '' }}" data-money>{{ $t->type->value === 'income' ? '+ ' : '− ' }}{{ Money::format($t->amount, $hide) }}</span>
+                  </div>
+                @endforeach
+              </div>
+              <div class="history__empty" @unless($repPaginator->isEmpty()) hidden @endunless>Nenhum lançamento nesse recorte.</div>
+              @if($repPaginator->total() > 0)
+                <div class="tx-foot">
+                  <span class="tx-foot__summary">Mostrando {{ $repPaginator->firstItem() }}–{{ $repPaginator->lastItem() }} de {{ $repPaginator->total() }} lançamentos</span>
+                  <span class="tx-pager">
+                    <a class="btn-icon btn-icon--sm" aria-label="Página anterior" href="{{ $repPaginator->previousPageUrl() ?? '#relatorios' }}#relatorios" style="{{ $repPaginator->onFirstPage() ? 'opacity:.4;pointer-events:none;' : '' }}"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></a>
+                    <span>
+                      @for($p = 1; $p <= $repPaginator->lastPage(); $p++)
+                        <a class="tx-page {{ $p === $repPaginator->currentPage() ? 'is-current' : '' }}" href="{{ $repPaginator->url($p) }}#relatorios">{{ $p }}</a>
+                      @endfor
+                    </span>
+                    <a class="btn-icon btn-icon--sm" aria-label="Próxima página" href="{{ $repPaginator->nextPageUrl() ?? '#relatorios' }}#relatorios" style="{{ $repPaginator->hasMorePages() ? '' : 'opacity:.4;pointer-events:none;' }}"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a>
+                  </span>
+                </div>
+              @endif
+            </div>
           </section>
         </section>
 
@@ -1666,6 +1797,11 @@
                       @error('email')<span class="field-error">{{ $message }}</span>@enderror
                     </label>
                   </div>
+                  <label class="field">
+                    <span class="field__label">Senha atual</span>
+                    <input class="input" type="password" name="current_password" autocomplete="current-password" placeholder="Necessária apenas se você alterar o e-mail">
+                    @error('current_password')<span class="field-error">{{ $message }}</span>@enderror
+                  </label>
                   <div class="form-foot form-foot--bare">
                     <button class="btn-primary btn-primary--sm" type="submit"><i class="fa-solid fa-check" aria-hidden="true"></i>Salvar perfil</button>
                   </div>
@@ -1822,6 +1958,93 @@
                       <span class="settings__row-text">{{ $activeSessionsCount }} {{ $activeSessionsCount === 1 ? 'dispositivo conectado' : 'dispositivos conectados' }}</span>
                     </span>
                     <button class="btn-ghost" type="button" data-modal-open="encerrarSessoes">Encerrar as outras</button>
+                  </div>
+
+                  <div class="mfa-card" data-mfa-card data-active="{{ $user->hasTwoFactorEnabled() ? 'true' : 'false' }}"
+                       data-mfa-has-password="{{ $user->hasUsablePassword() ? 'true' : 'false' }}"
+                       data-mfa-url-reauth="{{ route('reauthenticate') }}"
+                       {{-- Oferecido sempre que houver provedor vinculado, não só
+                            para quem tem has_usable_password = false: contas de
+                            login social criadas ANTES dessa coluna existir ficaram
+                            marcadas como "tem senha" e só conhecem uma senha
+                            aleatória — sem esta saída elas travariam em "senha
+                            incorreta" para sempre. --}}
+                       @if($reauthProvider)
+                           data-mfa-url-reauth-social="{{ route('social.reauthenticate', $reauthProvider) }}"
+                           data-mfa-reauth-provider-label="{{ $reauthProvider === 'github' ? 'GitHub' : 'Google' }}"
+                       @endif>
+                    <div class="mfa-card__head">
+                      <span class="mfa-card__icon" aria-hidden="true"><i class="fa-solid fa-shield-halved"></i></span>
+                      <div class="mfa-card__body">
+                        <span class="mfa-card__title-row">
+                          <span class="mfa-card__title">Autenticação de dois fatores</span>
+                          <span class="mfa-card__badge" data-mfa-badge>{{ $user->hasTwoFactorEnabled() ? 'Ativa' : 'Desativada' }}</span>
+                        </span>
+                        <span class="mfa-card__text" data-mfa-text>{{ $user->hasTwoFactorEnabled() ? 'Além da senha, o financiaí pede um código de 6 dígitos do seu app autenticador a cada novo login.' : 'Pede um código de 6 dígitos do seu app autenticador junto com a senha. Se alguém descobrir sua senha, ainda não entra.' }}</span>
+                      </div>
+                    </div>
+
+                    <div class="mfa-card__on" data-mfa-on @unless($user->hasTwoFactorEnabled()) hidden @endunless>
+                      <p class="mfa-card__since"><i class="fa-solid fa-mobile-screen"></i>App autenticador ativado em <strong data-mfa-date>{{ $user->two_factor_confirmed_at?->translatedFormat('d \d\e F \d\e Y') }}</strong></p>
+                      <div class="mfa-card__actions">
+                        <button class="btn-outline btn-outline--sm" type="button" data-mfa-regen><i class="fa-solid fa-rotate"></i>Gerar novos códigos de recuperação</button>
+                        <button class="btn-danger" type="button" data-mfa-open-off>Desativar</button>
+                      </div>
+                    </div>
+
+                    <div class="mfa-card__off" data-mfa-off @if($user->hasTwoFactorEnabled()) hidden @endif>
+                      <button class="btn-primary btn-primary--sm" type="button" data-mfa-open-on><i class="fa-solid fa-shield-halved"></i>Ativar</button>
+                      <span class="mfa-card__hint">Leva menos de um minuto.</span>
+                    </div>
+                  </div>
+
+                  @php
+                      $activityIcons = ['acesso' => 'fa-solid fa-right-to-bracket', 'alteracao' => 'fa-regular fa-pen-to-square', 'alerta' => 'fa-solid fa-triangle-exclamation'];
+                      $activityFilterUrl = fn ($type) => route('dashboard', array_merge($filters, ['sec_type' => $type === 'todos' ? null : $type])).'#cfg-seguranca';
+                  @endphp
+                  <div class="activity" data-activity>
+                    <div class="activity__head">
+                      <span class="activity__head-body">
+                        <span class="activity__title">Atividade da conta</span>
+                        <span class="activity__sub">Acessos, alterações sensíveis e tentativas bloqueadas.</span>
+                      </span>
+                      <span class="activity__filters">
+                        @foreach(['todos' => 'Tudo', 'acesso' => 'Acessos', 'alteracao' => 'Alterações', 'alerta' => 'Bloqueios'] as $key => $label)
+                          <a class="chip {{ $activityType === $key ? 'is-selected' : '' }}" href="{{ $activityFilterUrl($key) }}">{{ $label }} ({{ $activityCounts[$key] }})</a>
+                        @endforeach
+                      </span>
+                    </div>
+                    <div class="activity__list">
+                      @forelse($activityPage as $log)
+                        <div class="activity__row" data-kind="{{ $log->category }}">
+                          <span class="activity__icon" aria-hidden="true"><i class="{{ $activityIcons[$log->category] ?? 'fa-solid fa-circle-info' }}"></i></span>
+                          <span class="activity__body">
+                            <span class="activity__desc">{{ $log->describe() }}</span>
+                            <span class="activity__where">{{ \App\Support\UserAgentSummary::describe($log->user_agent) }} · {{ $log->ip_address }}</span>
+                          </span>
+                          <span class="activity__when">
+                            <span class="activity__date">{{ $log->created_at->format('d/m/Y') }}</span>
+                            <span class="activity__hour">{{ $log->created_at->format('H:i') }}</span>
+                          </span>
+                        </div>
+                      @empty
+                        <p class="history__empty">Nenhum registro nesse recorte.</p>
+                      @endforelse
+                    </div>
+                    @if($activityPage->total() > 0)
+                      <div class="tx-foot">
+                        <span class="tx-foot__summary">Mostrando {{ $activityPage->firstItem() }}–{{ $activityPage->lastItem() }} de {{ $activityPage->total() }} registros</span>
+                        <span class="tx-pager">
+                          <a class="btn-icon btn-icon--sm" aria-label="Página anterior" href="{{ $activityPage->previousPageUrl() ?? '#cfg-seguranca' }}#cfg-seguranca" style="{{ $activityPage->onFirstPage() ? 'opacity:.4;pointer-events:none;' : '' }}"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></a>
+                          <span>
+                            @for($p = 1; $p <= $activityPage->lastPage(); $p++)
+                              <a class="tx-page {{ $p === $activityPage->currentPage() ? 'is-current' : '' }}" href="{{ $activityPage->url($p) }}#cfg-seguranca">{{ $p }}</a>
+                            @endfor
+                          </span>
+                          <a class="btn-icon btn-icon--sm" aria-label="Próxima página" href="{{ $activityPage->nextPageUrl() ?? '#cfg-seguranca' }}#cfg-seguranca" style="{{ $activityPage->hasMorePages() ? '' : 'opacity:.4;pointer-events:none;' }}"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a>
+                        </span>
+                      </div>
+                    @endif
                   </div>
                 </div>
               </section>
@@ -2078,6 +2301,61 @@
       <div class="modal__foot">
         <button class="btn-ghost" type="button" data-modal-close>Cancelar</button>
         <button class="btn-primary btn-primary--sm" type="submit"><i class="fa-solid fa-check" aria-hidden="true"></i>Confirmar pagamento</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============ Modal: editar fatura aberta ============ -->
+<div class="modal" data-modal="fatura" hidden>
+  <div class="modal__veil" data-modal-close></div>
+  <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="modal-fatura-titulo">
+    <form method="POST" action="" data-fatura-form>
+      @csrf
+      @method('PATCH')
+      <div class="modal__head">
+        <div>
+          <h2 class="modal__title" id="modal-fatura-titulo">Editar fatura aberta</h2>
+          <p class="modal__sub">Vale só para a fatura em aberto deste mês. O cartão continua com as regras padrão.</p>
+        </div>
+        <button class="modal__close" type="button" aria-label="Fechar" data-modal-close><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+      </div>
+      <div class="modal__body">
+        <p class="field__hint"><i class="fa-regular fa-credit-card" aria-hidden="true"></i> <span data-fatura-card>—</span></p>
+
+        <div class="field">
+          <span class="field__label">Vencimento desta fatura</span>
+          <x-datepicker name="due_date" :value="null" data-fatura-due />
+        </div>
+
+        <div class="field-row">
+          <label class="field">
+            <span class="field__label">Ajuste manual</span>
+            <span class="chip-row" data-chip-group>
+              <button class="chip is-selected" type="button" data-value="acrescimo">Acréscimo</button>
+              <button class="chip" type="button" data-value="desconto">Desconto</button>
+            </span>
+            <input type="hidden" name="adjustment_type" value="acrescimo" data-chip-input data-fatura-adjustment-type>
+          </label>
+          <label class="field">
+            <span class="field__label">Valor do ajuste</span>
+            <span class="input-money">
+              <span class="input-money__prefix">R$</span>
+              <input class="input-money__input" type="text" inputmode="decimal" name="adjustment_amount" placeholder="0,00" data-fatura-adjustment-amount>
+            </span>
+          </label>
+        </div>
+
+        <label class="field">
+          <span class="field__label">Motivo</span>
+          <input class="input" type="text" name="adjustment_reason" placeholder="Ex.: estorno de compra cancelada" data-fatura-reason>
+          @error('adjustment_reason')<span class="field-error">{{ $message }}</span>@enderror
+        </label>
+        <p class="field__hint"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> O ajuste substitui o anterior — não é somado a ele.</p>
+      </div>
+      <div class="modal__foot">
+        <button class="btn-ghost" type="button" data-modal-close>Cancelar</button>
+        <button class="btn-primary btn-primary--sm" type="submit"><i class="fa-solid fa-check" aria-hidden="true"></i>Salvar fatura</button>
       </div>
     </form>
   </div>
@@ -2544,10 +2822,11 @@
         <div class="field">
           <span class="field__label">Repete a cada</span>
           <div class="chip-row" data-chip-group>
-            <button class="chip is-selected" type="button">Mês</button>
-            <button class="chip" type="button">Dois meses</button>
-            <button class="chip" type="button">Ano</button>
+            <button class="chip is-selected" type="button" data-value="1">Mês</button>
+            <button class="chip" type="button" data-value="2">Dois meses</button>
+            <button class="chip" type="button" data-value="12">Ano</button>
           </div>
+          <input type="hidden" name="recurrence_interval_months" value="1" data-chip-input>
         </div>
 
         <div class="field">
@@ -2668,6 +2947,149 @@
         <button class="btn-danger" type="submit">Encerrar conta</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- ============ Modais de dois fatores ============ -->
+{{-- Confirmação de identidade antes de INICIAR a ativação do MFA. O modal de
+     senha do handoff (mfa-senha) atende só desativar/regerar, que já nascem com
+     campo de senha; ativar não tinha nenhum, e passou a exigir reautenticação
+     (achado A1). Vive fora do mfa.js, que é cópia do handoff e não se edita. --}}
+<div class="modal" data-modal="mfa-reautenticar" hidden>
+  <div class="modal__veil" data-modal-close></div>
+  <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="modal-mfa-reauth-titulo">
+    <div class="modal__head">
+      <div>
+        <h2 class="modal__title" id="modal-mfa-reauth-titulo">Confirme que é você</h2>
+        <p class="modal__sub">Ativar a verificação em duas etapas exige confirmar sua identidade.</p>
+      </div>
+      <button class="modal__close" type="button" aria-label="Fechar" data-modal-close><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    </div>
+
+    <div class="modal__body">
+      <label class="field">
+        <span class="field__label">Sua senha atual</span>
+        <input class="input" type="password" autocomplete="current-password" placeholder="Sua senha" data-mfa-reauth-password>
+      </label>
+      <p class="field__error" data-mfa-reauth-error hidden>Senha incorreta. Tente de novo.</p>
+      <p class="mfa-links" data-mfa-reauth-social-wrap hidden>
+        <a class="link-sm" href="#" data-mfa-reauth-social-link>Não sei minha senha — confirmar pelo provedor</a>
+      </p>
+    </div>
+
+    <div class="modal__foot">
+      <button class="btn-ghost" type="button" data-modal-close>Cancelar</button>
+      <button class="btn-primary btn-primary--sm" type="button" data-mfa-reauth-confirm>Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" data-modal="mfa-ativar" hidden
+     data-mfa-url-start="{{ route('two-factor.enable') }}"
+     data-mfa-url-confirm="{{ route('two-factor.confirm') }}">
+  <div class="modal__veil" data-modal-close></div>
+  <div class="modal__dialog modal__dialog--wide" role="dialog" aria-modal="true" aria-labelledby="modal-mfa-titulo">
+    <div class="modal__head modal__head--stack">
+      <div class="modal__head-row">
+        <div>
+          <h2 class="modal__title" id="modal-mfa-titulo" data-mfa-modal-title>Ativar dois fatores</h2>
+          <p class="modal__sub" data-mfa-modal-sub>Três etapas rápidas: escanear, confirmar e guardar os códigos de recuperação.</p>
+        </div>
+        <button class="modal__close" type="button" aria-label="Fechar" data-modal-close><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+      </div>
+      <div class="steps" data-mfa-steps>
+        <span class="steps__item" data-step="1"><span class="steps__bar"></span><span class="steps__label">1. Escanear</span></span>
+        <span class="steps__item" data-step="2"><span class="steps__bar"></span><span class="steps__label">2. Confirmar</span></span>
+        <span class="steps__item" data-step="3"><span class="steps__bar"></span><span class="steps__label">3. Recuperação</span></span>
+      </div>
+    </div>
+
+    <div class="modal__body" data-mfa-step="1">
+      <p class="mfa-step__text">Abra seu app autenticador (Google Authenticator, Authy, 1Password) e escaneie o código abaixo.</p>
+      <div class="mfa-scan">
+        <span class="mfa-scan__qr-wrap">
+          <span class="mfa-qr" aria-label="QR code de ativação" data-mfa-qr></span>
+          <span class="mfa-scan__caption">Escaneie com o app</span>
+        </span>
+        <div class="mfa-scan__manual">
+          <span class="mfa-scan__label">Não consegue escanear? Digite a chave:</span>
+          <span class="mfa-key">
+            <code class="mfa-key__code" data-mfa-key>••••</code>
+            <button class="mfa-key__copy" type="button" aria-label="Copiar chave" data-mfa-copy-key><i class="fa-regular fa-copy" aria-hidden="true"></i></button>
+          </span>
+          <span class="mfa-scan__note" data-mfa-key-note>A chave vale só para esta ativação.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal__body" data-mfa-step="2" hidden>
+      <p class="mfa-step__text">Digite o código de 6 dígitos que aparece no app agora. Ele muda a cada 30 segundos.</p>
+      <label class="field">
+        <span class="field__label">Código de verificação</span>
+        <input class="input input--code" type="text" inputmode="numeric" maxlength="6" placeholder="000000" data-mfa-code>
+      </label>
+      <div class="alert alert--danger" data-mfa-code-error hidden>
+        <i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>
+        <span class="alert__body">
+          <span class="alert__title" data-mfa-code-error-text>Código inválido ou já expirado.</span>
+          <span class="alert__text">Confira se o relógio do celular está no automático e tente com o código atual.</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="modal__body" data-mfa-step="3" hidden>
+      <div class="alert alert--neutral">
+        <i class="fa-solid fa-key" aria-hidden="true"></i>
+        <span class="alert__text">Cada código serve uma vez só. São a <strong>única forma de entrar</strong> se você perder o celular — guarde num lugar seguro.</span>
+      </div>
+      <div class="mfa-codes" data-mfa-codes></div>
+      <div class="mfa-card__actions">
+        <button class="btn-outline btn-outline--sm" type="button" data-mfa-copy-codes><i class="fa-regular fa-copy" aria-hidden="true"></i>Copiar todos</button>
+        <button class="btn-outline btn-outline--sm" type="button" data-mfa-download><i class="fa-solid fa-download" aria-hidden="true"></i>Baixar .txt</button>
+      </div>
+      <label class="mfa-confirm" data-mfa-confirm-box>
+        <input class="checkbox" type="checkbox" data-mfa-saved>
+        <span>Eu salvei meus códigos de recuperação</span>
+      </label>
+    </div>
+
+    <div class="modal__foot modal__foot--split">
+      <button class="btn-ghost" type="button" data-mfa-back hidden><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>Voltar</button>
+      <div class="modal__foot-right">
+        <button class="btn-ghost" type="button" data-modal-close data-mfa-cancel>Cancelar</button>
+        <button class="btn-primary btn-primary--sm" type="button" data-mfa-next><i class="fa-solid fa-arrow-right" aria-hidden="true"></i><span data-mfa-next-label>Já escaneei</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" data-modal="mfa-senha" hidden
+     data-mfa-url-disable="{{ route('two-factor.disable') }}"
+     data-mfa-url-regen="{{ route('two-factor.recovery-codes') }}">
+  <div class="modal__veil" data-modal-close></div>
+  <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="modal-mfa-off-titulo">
+    <div class="modal__head">
+      <div>
+        <h2 class="modal__title" id="modal-mfa-off-titulo" data-mfa-off-title>Desativar dois fatores?</h2>
+        <p class="modal__sub" data-mfa-off-sub>Sua conta volta a ser protegida só pela senha.</p>
+      </div>
+      <button class="modal__close" type="button" aria-label="Fechar" data-modal-close><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    </div>
+    <div class="modal__body">
+      <div class="alert alert--danger" data-mfa-off-alert>
+        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+        <span class="alert__text" data-mfa-off-alert-text>Seus códigos de recuperação atuais serão invalidados. Se ativar de novo depois, o app terá que ser reconfigurado.</span>
+      </div>
+      <label class="field">
+        <span class="field__label">Confirme sua senha atual</span>
+        <input class="input" type="password" autocomplete="current-password" placeholder="Sua senha" data-mfa-password>
+      </label>
+      <p class="field__error" data-mfa-password-error hidden>Senha incorreta. Tente de novo.</p>
+    </div>
+    <div class="modal__foot">
+      <button class="btn-ghost" type="button" data-modal-close>Cancelar</button>
+      <button class="btn-danger" type="button" data-mfa-confirm-off><i class="fa-solid fa-ban" aria-hidden="true"></i><span data-mfa-off-confirm-label>Desativar</span></button>
+    </div>
   </div>
 </div>
 

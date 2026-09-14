@@ -94,8 +94,15 @@ class TransactionImportService
         $user = $batch->user;
         $dates = [];
         $read = 0;
+        // Fingerprints/external_ids já vistos nesta mesma leitura — sem isso,
+        // duas linhas idênticas dentro de UM único arquivo (ex.: banco
+        // exportou a mesma compra duas vezes) chegavam ambas como "new" e a
+        // segunda estourava a constraint única só na hora de confirmar,
+        // derrubando o commit inteiro do lote (ver commit() abaixo).
+        $seenFingerprints = [];
+        $seenExternalIds = [];
 
-        DB::transaction(function () use ($rows, $batch, $user, &$dates, &$read) {
+        DB::transaction(function () use ($rows, $batch, $user, &$dates, &$read, &$seenFingerprints, &$seenExternalIds) {
             foreach ($rows as $row) {
                 $read++;
 
@@ -141,13 +148,22 @@ class TransactionImportService
                 $externalId = trim((string) ($row['external_id'] ?? '')) ?: null;
                 $normalizedDescription = $this->normalizeDescription($description);
                 $fingerprint = $this->fingerprint($batch->account_id, $date, $normalizedDescription, $absolute);
-                $status = $this->duplicateStatus($user->id, $batch->account_id, $externalId, $fingerprint);
+                $status = ($externalId !== null && isset($seenExternalIds[$externalId]))
+                    ? ImportRowStatus::DuplicateExact
+                    : (isset($seenFingerprints[$fingerprint])
+                        ? ImportRowStatus::DuplicateProbable
+                        : $this->duplicateStatus($user->id, $batch->account_id, $externalId, $fingerprint));
                 $suggestedCategoryId = in_array($status, [ImportRowStatus::DuplicateExact, ImportRowStatus::DuplicateProbable], true)
                     ? null
                     : $this->suggestCategory($user, $type, $normalizedDescription);
 
                 if ($status === ImportRowStatus::New && $suggestedCategoryId === null) {
                     $status = ImportRowStatus::NeedsCategory;
+                }
+
+                $seenFingerprints[$fingerprint] = true;
+                if ($externalId !== null) {
+                    $seenExternalIds[$externalId] = true;
                 }
 
                 $batch->rows()->create([
@@ -189,7 +205,33 @@ class TransactionImportService
 
             $rows = $batch->rows()->whereIn('id', $includedRowIds)->where('status', '!=', ImportRowStatus::Invalid)->get();
 
+            // Segunda rede de segurança além da marcação em parseIntoStaging():
+            // se mesmo assim duas linhas incluídas baterem em qualquer uma das
+            // DUAS constraints únicas da tabela — (user_id, import_hash) ou
+            // (user_id, account_id, external_id) — pular a repetida em vez de
+            // deixar o banco estourar e desfazer o commit inteiro do lote.
+            $committedFingerprints = [];
+            $committedExternalIds = [];
+
             foreach ($rows as $row) {
+                $externalIdTaken = $row->external_id !== null && (
+                    isset($committedExternalIds[$row->external_id])
+                    || Transaction::where('user_id', $batch->user_id)
+                        ->where('account_id', $batch->account_id)
+                        ->where('external_id', $row->external_id)
+                        ->exists()
+                );
+
+                if ($externalIdTaken
+                    || isset($committedFingerprints[$row->fingerprint])
+                    || Transaction::where('user_id', $batch->user_id)->where('import_hash', $row->fingerprint)->exists()) {
+                    continue;
+                }
+                $committedFingerprints[$row->fingerprint] = true;
+                if ($row->external_id !== null) {
+                    $committedExternalIds[$row->external_id] = true;
+                }
+
                 $categoryId = array_key_exists($row->id, $categoryOverrides) ? $categoryOverrides[$row->id] : $row->suggested_category_id;
                 if ($categoryId !== null && ! Category::where('id', $categoryId)->where('user_id', $batch->user_id)->exists()) {
                     $categoryId = null;

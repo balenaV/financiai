@@ -9,6 +9,7 @@ use App\Services\AccountBalanceService;
 use App\Support\Money;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\View\View;
 
 class AccountController extends Controller
@@ -41,15 +42,63 @@ class AccountController extends Controller
         return redirect(route('dashboard').'#contas')->with('success', 'Conta criada com sucesso.');
     }
 
-    public function show(Account $account, AccountBalanceService $balances): View
+    public function show(Request $request, Account $account, AccountBalanceService $balances): View
     {
         $this->authorize('view', $account);
+
+        $filters = $request->validate([
+            'stmt_search' => ['nullable', 'string', 'max:255'],
+            'stmt_type' => ['nullable', 'in:entradas,saidas'],
+            'stmt_page' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        // 5000 cobre décadas de uso real (uma conta com esse volume de
+        // lançamentos já teria centenas de páginas de extrato); é só um teto
+        // contra materializar uma tabela inteira em memória num request só.
+        $fullHistory = collect($balances->history($account, 5000));
+        $counts = [
+            'todas' => $fullHistory->count(),
+            'entradas' => $fullHistory->where('amount', '>', 0)->count(),
+            'saidas' => $fullHistory->where('amount', '<', 0)->count(),
+        ];
+
+        $filtered = $fullHistory
+            ->when(
+                $filters['stmt_search'] ?? null,
+                fn ($rows, $search) => $rows->filter(fn ($row) => str_contains(mb_strtolower($row['description']), mb_strtolower($search))),
+            )
+            ->when(
+                ($filters['stmt_type'] ?? null) === 'entradas',
+                fn ($rows) => $rows->where('amount', '>', 0),
+            )
+            ->when(
+                ($filters['stmt_type'] ?? null) === 'saidas',
+                fn ($rows) => $rows->where('amount', '<', 0),
+            )
+            ->values();
+
+        $perPage = 8;
+        $page = (int) ($filters['stmt_page'] ?? 1);
+        $statementPage = new LengthAwarePaginator(
+            $filtered->forPage($page, $perPage)->values(),
+            $filtered->count(),
+            $perPage,
+            $page,
+            ['pageName' => 'stmt_page'],
+        );
+        $statementPage->appends([
+            'stmt_search' => $filters['stmt_search'] ?? null,
+            'stmt_type' => $filters['stmt_type'] ?? null,
+        ]);
 
         return view('accounts.show', [
             'account' => $account,
             'current' => $balances->current($account),
             'projected' => $balances->projected($account),
-            'transactions' => $account->transactions()->with('category')->latest('competence_date')->paginate(15),
+            'statementPage' => $statementPage,
+            'stmtCounts' => $counts,
+            'stmtSearch' => $filters['stmt_search'] ?? '',
+            'stmtType' => $filters['stmt_type'] ?? 'todas',
         ]);
     }
 

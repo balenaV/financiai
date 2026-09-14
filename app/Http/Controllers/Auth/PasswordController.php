@@ -20,9 +20,10 @@ class PasswordController extends Controller
             'password' => ['required', new StrongPassword, 'confirmed'],
         ]);
 
-        $request->user()->update([
+        $request->user()->forceFill([
             'password' => Hash::make($validated['password']),
-        ]);
+            'has_usable_password' => true,
+        ])->save();
 
         return back()->with('status', 'password-updated');
     }

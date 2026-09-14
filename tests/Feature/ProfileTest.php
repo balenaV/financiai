@@ -23,6 +23,7 @@ class ProfileTest extends TestCase
             ->patch('/profile', [
                 'name' => 'Test User',
                 'email' => 'test@example.com',
+                'current_password' => 'password',
             ]);
 
         $response
@@ -34,6 +35,64 @@ class ProfileTest extends TestCase
         $this->assertSame('Test User', $user->name);
         $this->assertSame('test@example.com', $user->email);
         $this->assertNull($user->email_verified_at);
+    }
+
+    public function test_changing_email_requires_the_current_password(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this
+            ->actingAs($user)
+            ->from('/profile')
+            ->patch('/profile', [
+                'name' => $user->name,
+                'email' => 'novo@example.com',
+            ]);
+
+        $response
+            ->assertSessionHasErrors('current_password')
+            ->assertRedirect('/profile');
+
+        $this->assertSame($user->email, $user->fresh()->email);
+    }
+
+    public function test_changing_email_with_the_wrong_current_password_fails(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this
+            ->actingAs($user)
+            ->from('/profile')
+            ->patch('/profile', [
+                'name' => $user->name,
+                'email' => 'novo@example.com',
+                'current_password' => 'senha-errada',
+            ]);
+
+        $response
+            ->assertSessionHasErrors('current_password')
+            ->assertRedirect('/profile');
+
+        $this->assertSame($user->email, $user->fresh()->email);
+    }
+
+    public function test_updating_name_without_changing_email_does_not_require_a_password(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this
+            ->actingAs($user)
+            ->from('/profile')
+            ->patch('/profile', [
+                'name' => 'Nome Novo',
+                'email' => $user->email,
+            ]);
+
+        $response
+            ->assertSessionHasNoErrors()
+            ->assertRedirect('/profile');
+
+        $this->assertSame('Nome Novo', $user->fresh()->name);
     }
 
     public function test_updating_profile_from_the_dashboard_settings_tab_returns_there_not_to_the_legacy_page(): void

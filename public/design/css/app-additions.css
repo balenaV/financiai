@@ -151,3 +151,128 @@
   flex: 1;
   min-width: 0;
 }
+
+/* ".kpi__delta" existe em dois arquivos do próprio pacote com propósitos
+   diferentes: dashboard.css estiliza o selo curto "Positivo"/"+4,2%" dos
+   cards da Visão Geral (pílula verde/--accent); fase5.css usa o MESMO nome
+   para a nota "vs. mês anterior" dos KPIs de Relatórios (pílula neutra, com
+   borda). Como fase5.css carrega depois de dashboard.css, a regra dele
+   ganha a cascata para as duas telas por igual — o selo "Positivo" da Visão
+   Geral também ficava cinza/neutro. Escopar cada uma pela aba (data-page)
+   resolve sem editar nenhum dos dois arquivos copiados. */
+[data-page="visao"] .kpi__delta {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(56, 193, 114, 0.14);
+  padding: 4px 9px;
+  border-radius: 7px;
+  white-space: nowrap;
+}
+
+[data-page="visao"] .kpi__delta--neutral {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+[data-page="relatorios"] .kpi__delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+[data-page="relatorios"] .kpi__delta i { font-size: 9px; }
+
+/* ".kpi__value" nunca ganhou as variantes "is-positive"/"is-negative" em
+   nenhum CSS do pacote (só ".kpi__value--accent", sem opção para negativo) —
+   mas o HTML usa essas duas classes em Orçamentos, Investimentos, Previsão
+   e agora também em Relatórios. Mesmo padrão de cor já usado em
+   ".account-card__figure-value.is-positive/is-negative". */
+.kpi__value.is-positive { color: var(--accent); }
+.kpi__value.is-negative { color: var(--danger); }
+
+/* O protótipo original não tem <form> em volta dos filtros de Transações —
+   as duas linhas ".filters"/".filters--second" são filhas diretas de
+   ".stack" (display:grid; gap:14px). O port real precisa de um <form
+   method="GET"> ali para enviar os filtros ao servidor, mas isso empurra as
+   duas linhas para dentro de um wrapper que não é item do grid — o gap
+   desaparece e as linhas colam uma na outra. "display:contents" no form
+   remove só ele da árvore de layout (mantendo o comportamento de envio),
+   então os filhos voltam a ser itens diretos do grid e herdam o gap. */
+[data-tx-filters] {
+  display: contents;
+}
+
+/* fase5.css só estiliza ".report-detail__row--head button" — os cabeçalhos
+   ordenáveis viraram links (paginação/ordenação renderizadas no servidor,
+   sem JS), então a mesma aparência precisa valer para "a" também. */
+.report-detail__row--head a {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+  color: inherit;
+  text-decoration: none;
+}
+
+.report-detail__row--head a:hover { color: var(--fg); }
+.report-detail__row--head a i { font-size: 9px; opacity: 0.55; }
+.report-detail__row--head a.is-right { justify-content: flex-end; }
+
+/* ---------------------------------------------------------------------------
+   Toasts de sucesso/erro
+
+   O bloco de toast dos layouts vinha do sistema antigo e era montado só com
+   utilitários do Tailwind (fixed, rounded-xl, bg-accent-50, shadow-lg...).
+   Nenhum desses layouts carrega o Tailwind — só o pacote public/design/css —
+   então as classes não existiam e o toast perdia até o position: fixed:
+   aparecia como texto solto no fluxo do documento. Como praticamente toda
+   ação de escrita do app redireciona com ->with('success'|'error'), era a
+   mensagem mais vista do sistema e a menos apresentável.
+
+   Segue a linguagem do .alert (mfa.css), acrescentando o sombreado duro dos
+   elementos flutuantes (.dropdown__menu).
+   -------------------------------------------------------------------------- */
+.toast-stack {
+  position: fixed;
+  top: 78px;
+  right: 18px;
+  z-index: 70;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 36px));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 15px;
+  border: 1.5px solid var(--hard);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 4px 4px 0 var(--hard);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--fg);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.toast i { margin-top: 2px; font-size: 13px; }
+.toast--success i { color: var(--accent); }
+.toast--error i { color: var(--danger); }
+.toast--error { border-color: var(--danger); box-shadow: 4px 4px 0 var(--danger); }
+
+.toast.is-leaving { opacity: 0; transform: translateX(8px); }
+
+@media (max-width: 640px) {
+  .toast-stack { top: auto; bottom: 18px; right: 12px; left: 12px; width: auto; }
+}

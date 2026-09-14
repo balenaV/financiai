@@ -71,12 +71,12 @@ class AccountBalanceService
      *
      * @return array<int, array{date: CarbonInterface, description: string, amount: string, balance_after: string}>
      */
-    public function history(Account $account, int $limit = 30): array
+    public function history(Account $account, ?int $limit = 30): array
     {
         $outgoing = $account->transactions()
             ->where('status', TransactionStatus::Completed->value)
             ->latest('competence_date')->latest('id')
-            ->limit($limit)
+            ->when($limit, fn (Builder $query) => $query->limit($limit))
             ->get()
             ->map(fn ($transaction) => [
                 'date' => $transaction->competence_date,
@@ -90,7 +90,7 @@ class AccountBalanceService
         $incoming = $account->incomingTransfers()
             ->where('status', TransactionStatus::Completed->value)
             ->latest('competence_date')->latest('id')
-            ->limit($limit)
+            ->when($limit, fn (Builder $query) => $query->limit($limit))
             ->get()
             ->map(fn ($transaction) => [
                 'date' => $transaction->competence_date,
@@ -101,7 +101,7 @@ class AccountBalanceService
 
         $movements = $outgoing->concat($incoming)
             ->sortBy([['date', 'desc'], ['id', 'desc']])
-            ->take($limit)
+            ->when($limit, fn ($collection) => $collection->take($limit))
             ->values();
 
         $balance = $this->current($account);

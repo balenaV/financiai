@@ -212,19 +212,61 @@ class FinancialIntegrityTest extends TestCase
         ]);
 
         $this->actingAs($user)
-            ->get(route('credit-card-bills.edit', $openBill))
-            ->assertOk()
-            ->assertSee('Esta fatura ainda está aberta');
+            ->patch(route('credit-card-bills.update', $openBill), [
+                'due_date' => '2026-08-05',
+                'adjustment_type' => 'acrescimo',
+                'adjustment_amount' => '45,67',
+                'adjustment_reason' => 'Estorno de compra cancelada',
+            ])
+            ->assertRedirect(route('dashboard').'#cartoes');
+
+        $openBill->refresh();
+        $this->assertSame('45.67', $openBill->total_amount);
+        $this->assertSame('45.67', $openBill->adjustment_amount);
+        $this->assertSame('2026-08-05', $openBill->due_date->toDateString());
 
         $this->actingAs($user)
-            ->patch(route('credit-card-bills.update', $openBill), [
-                'total_amount' => '145,67',
-                'notes' => 'Novas compras',
+            ->patch(route('credit-card-bills.update', $closedBill), [
+                'adjustment_type' => 'acrescimo',
+                'adjustment_amount' => '10,00',
+                'adjustment_reason' => 'Tentativa em fatura fechada',
             ])
-            ->assertRedirect(route('credit-cards.show', $card));
+            ->assertSessionHasErrors('bill');
+    }
 
-        $this->assertSame('145.67', $openBill->refresh()->total_amount);
-        $this->actingAs($user)->get(route('credit-card-bills.edit', $closedBill))->assertStatus(422);
+    /**
+     * Achado de segurança: um PATCH que omite adjustment_amount (ex.: uma
+     * chamada de API parcial, fora do form da tela) não pode zerar
+     * silenciosamente um ajuste já salvo — só quem manda o campo vazio de
+     * propósito é que limpa o ajuste.
+     */
+    public function test_updating_only_the_due_date_preserves_the_existing_adjustment(): void
+    {
+        $this->travelTo('2026-07-23');
+        $user = User::factory()->create();
+        $card = CreditCard::factory()->for($user)->create(['closing_day' => 25, 'due_day' => 30]);
+        $bill = app(CreditCardService::class)->createBill($user, $card, [
+            'reference_month' => '2026-07',
+            'total_amount' => '100.00',
+            'due_date' => '2026-07-30',
+        ]);
+
+        $this->actingAs($user)->patch(route('credit-card-bills.update', $bill), [
+            'adjustment_type' => 'acrescimo',
+            'adjustment_amount' => '20,00',
+            'adjustment_reason' => 'Compra atrasada',
+        ]);
+        $this->assertSame('20.00', $bill->refresh()->adjustment_amount);
+
+        // Segunda edição manda só o vencimento — sem adjustment_amount/reason.
+        $this->actingAs($user)->patch(route('credit-card-bills.update', $bill), [
+            'due_date' => '2026-08-10',
+        ]);
+
+        $bill->refresh();
+        $this->assertSame('2026-08-10', $bill->due_date->toDateString());
+        $this->assertSame('20.00', $bill->adjustment_amount, 'o ajuste anterior não deveria ter sido zerado');
+        $this->assertSame('Compra atrasada', $bill->adjustment_reason);
     }
 
     private function cardPurchase(CreditCard $card, string $amount, string $date): array

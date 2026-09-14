@@ -8,6 +8,7 @@ use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Auth\SocialAuthenticationController;
+use App\Http\Controllers\Auth\TwoFactorChallengeController;
 use App\Http\Controllers\Auth\VerifyEmailController;
 use Illuminate\Support\Facades\Route;
 
@@ -22,15 +23,18 @@ Route::middleware('guest')->group(function () {
     Route::get('login', [AuthenticatedSessionController::class, 'create'])
         ->name('login');
 
-    Route::post('login', [AuthenticatedSessionController::class, 'store']);
+    Route::post('login', [AuthenticatedSessionController::class, 'store'])->middleware('throttle:20,1');
+
+    Route::get('two-factor-challenge', [TwoFactorChallengeController::class, 'create'])
+        ->name('two-factor.challenge');
+
+    Route::post('two-factor-challenge', [TwoFactorChallengeController::class, 'store'])
+        ->middleware('throttle:two-factor')
+        ->name('two-factor.verify');
 
     Route::get('auth/{provider}/redirect', [SocialAuthenticationController::class, 'redirect'])
         ->middleware('throttle:10,1')
         ->name('social.redirect');
-
-    Route::get('auth/{provider}/callback', [SocialAuthenticationController::class, 'callback'])
-        ->middleware('throttle:10,1')
-        ->name('social.callback');
 
     Route::get('forgot-password', [PasswordResetLinkController::class, 'create'])
         ->name('password.request');
@@ -47,7 +51,21 @@ Route::middleware('guest')->group(function () {
         ->name('password.store');
 });
 
+// Fora do grupo "guest" de propósito: o provedor só conhece UMA URL de
+// callback por ambiente (registrada no console do Google/GitHub), então ela
+// precisa atender tanto o login de visitante quanto o re-consentimento de
+// quem já está autenticado. O controller separa os dois casos e continua
+// mandando o visitante autenticado sem intenção de reautenticar de volta
+// para o dashboard, preservando o comportamento anterior.
+Route::get('auth/{provider}/callback', [SocialAuthenticationController::class, 'callback'])
+    ->middleware('throttle:10,1')
+    ->name('social.callback');
+
 Route::middleware('auth')->group(function () {
+    Route::get('auth/{provider}/reauthenticate', [SocialAuthenticationController::class, 'reauthenticate'])
+        ->middleware('throttle:10,1')
+        ->name('social.reauthenticate');
+
     Route::get('verify-email', EmailVerificationPromptController::class)
         ->name('verification.notice');
 

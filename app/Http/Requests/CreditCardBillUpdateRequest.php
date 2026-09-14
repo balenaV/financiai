@@ -14,8 +14,10 @@ class CreditCardBillUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'total_amount' => ['required', 'regex:/^[\d.,\s]+$/', 'not_in:0,0.00,0,00'],
-            'notes' => ['nullable', 'string', 'max:2000'],
+            'due_date' => ['nullable', 'date'],
+            'adjustment_type' => ['nullable', 'in:acrescimo,desconto'],
+            'adjustment_amount' => ['nullable', 'regex:/^[\d.,\s]*$/'],
+            'adjustment_reason' => ['nullable', 'string', 'max:255', 'required_with:adjustment_amount'],
         ];
     }
 }

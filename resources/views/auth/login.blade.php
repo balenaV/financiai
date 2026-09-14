@@ -1,5 +1,5 @@
 @php
-    $modes = ['login', 'registro', 'recuperar', 'redefinir', 'verificar'];
+    $modes = ['login', 'registro', 'recuperar', 'redefinir', 'verificar', 'desafio'];
     $mode = in_array($mode ?? null, $modes, true) ? $mode : 'login';
     $copy = [
         'login' => [
@@ -21,6 +21,10 @@
             'titulo' => 'Falta confirmar seu e-mail.',
             'subtitulo' => 'Enviamos um link de confirmação para o e-mail cadastrado. Depois de confirmar, seu painel fica liberado.',
         ],
+        'desafio' => [
+            'titulo' => 'Só falta o segundo passo.',
+            'subtitulo' => 'Sua conta tem verificação em duas etapas ativa. Confirme o código para concluir o login.',
+        ],
     ];
     $titulos = [
         'login' => 'Entrar',
@@ -28,6 +32,7 @@
         'recuperar' => 'Recuperar acesso',
         'redefinir' => 'Redefinir senha',
         'verificar' => 'Verificar e-mail',
+        'desafio' => 'Verificação em duas etapas',
     ];
 @endphp
 <x-auth-layout :title="$titulos[$mode]">
@@ -228,7 +233,13 @@
                 <div class="notice">
                   <span class="notice__icon" aria-hidden="true">&#9993;</span>
                   <span class="notice__body">
-                    <span class="notice__title">Confirmação enviada para <span data-email-echo>{{ auth()->user()->email }}</span></span>
+                    <span class="notice__title">
+                      @if(session('registered'))
+                        Conta criada com sucesso! Confirmação enviada para <span data-email-echo>{{ auth()->user()->email }}</span>
+                      @else
+                        Confirmação enviada para <span data-email-echo>{{ auth()->user()->email }}</span>
+                      @endif
+                    </span>
                     <span class="notice__text">O link expira em 24 horas. Enquanto isso, sua conta fica com acesso limitado.</span>
                   </span>
                 </div>
@@ -247,6 +258,49 @@
                     <button class="btn-outline-hard" type="submit">Sair da conta</button>
                   </form>
                 </div>
+              </div>
+          @endif
+
+          @if($mode === 'desafio')
+              <div class="auth-form auth-form--mfa" data-pane="mfa" data-state="active">
+                <div class="mfa-callout">
+                  <span class="mfa-callout__icon" aria-hidden="true">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5a5 5 0 0 0-5 5V9H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-1V6.5a5 5 0 0 0-5-5zm0 2.2a2.8 2.8 0 0 1 2.8 2.8V9H9.2V6.5A2.8 2.8 0 0 1 12 3.7zm0 10.1a1.9 1.9 0 0 1 1 3.5v1.9a1 1 0 0 1-2 0v-1.9a1.9 1.9 0 0 1 1-3.5z"/></svg>
+                  </span>
+                  <span class="mfa-callout__body">
+                    <span class="mfa-callout__title">Verificação em duas etapas</span>
+                    <span class="mfa-callout__text" data-mfa-text>Abra seu app autenticador e informe o código de 6 dígitos gerado agora para esta conta.</span>
+                  </span>
+                </div>
+
+                <form class="mfa-form" method="post" action="{{ route('two-factor.verify') }}" data-mfa-form>
+                  @csrf
+                  <input type="hidden" name="recovery" value="{{ old('recovery') ? '1' : '0' }}" data-mfa-recovery-flag>
+
+                  <label class="field" data-mfa-field="app" @if(old('recovery')) hidden @endif>
+                    <span class="field__label">Código de verificação</span>
+                    <input class="input input--code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" name="{{ old('recovery') ? '' : 'code' }}" value="{{ old('recovery') ? '' : old('code') }}" data-mfa-input="app">
+                  </label>
+
+                  <label class="field" data-mfa-field="recuperacao" @unless(old('recovery')) hidden @endunless>
+                    <span class="field__label">Código de recuperação</span>
+                    <input class="input input--recovery" type="text" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX" name="{{ old('recovery') ? 'code' : '' }}" value="{{ old('recovery') ? old('code') : '' }}" data-mfa-input="recuperacao">
+                  </label>
+
+                  @error('code', 'mfa')
+                      <p class="mfa-error">
+                        <span class="mfa-error__mark" aria-hidden="true">!</span>
+                        <span role="alert">{{ $message }}</span>
+                      </p>
+                  @enderror
+
+                  <button class="btn-primary" type="submit" data-mfa-submit>Confirmar e entrar</button>
+
+                  <div class="mfa-links">
+                    <a class="link-sm" href="#mfa" data-mfa-switch>{{ old('recovery') ? 'Usar o código do app' : 'Usar um código de recuperação' }}</a>
+                    <a class="link-sm link-sm--muted" href="{{ route('login') }}">Cancelar e sair</a>
+                  </div>
+                </form>
               </div>
           @endif
 

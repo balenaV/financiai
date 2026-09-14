@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="{{ asset('design/css/tokens.css') }}">
 <link rel="stylesheet" href="{{ asset('design/css/base.css') }}">
 <link rel="stylesheet" href="{{ asset('design/css/auth.css') }}">
+<link rel="stylesheet" href="{{ asset('design/css/mfa.css') }}">
 <link rel="stylesheet" href="{{ asset('design/css/app-additions.css') }}">
 <script>
     (function () {
@@ -30,5 +31,6 @@
 
 <script src="{{ asset('design/js/auth.js') }}"></script>
 <script src="{{ asset('design/js/auth-url-sync.js') }}"></script>
+<script src="{{ asset('design/js/mfa-challenge-sync.js') }}"></script>
 </body>
 </html>

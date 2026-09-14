@@ -10,6 +10,7 @@ use App\Services\InvestmentService;
 use App\Support\Money;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\View\View;
 
 class InvestmentController extends Controller
@@ -24,15 +25,51 @@ class InvestmentController extends Controller
         return redirect(route('dashboard').'#investimentos')->with('success', 'Investimento criado.');
     }
 
+    private const OP_GROUPS = [
+        'aportes' => [InvestmentOperationType::Contribution, InvestmentOperationType::Buy],
+        'resgates' => [InvestmentOperationType::Withdrawal, InvestmentOperationType::Sell],
+        'rendimentos' => [InvestmentOperationType::Yield, InvestmentOperationType::Dividend, InvestmentOperationType::ValueAdjustment],
+    ];
+
     public function show(Request $request, Investment $investment, InvestmentService $service): View
     {
         $this->authorize('view', $investment);
 
+        $filters = $request->validate([
+            'op_type' => ['nullable', 'in:aportes,resgates,rendimentos'],
+            'op_page' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        // Teto de 5000 pelo mesmo motivo do extrato de conta (AccountController):
+        // evita materializar um histórico inteiro em memória num request só.
+        $allOperations = $investment->operations()->with('account')->orderByDesc('operation_date')->orderByDesc('id')->limit(5000)->get();
+        $counts = collect(self::OP_GROUPS)->map(
+            fn ($types) => $allOperations->whereIn('type', $types)->count(),
+        )->put('todas', $allOperations->count());
+
+        $filtered = isset(self::OP_GROUPS[$filters['op_type'] ?? null])
+            ? $allOperations->whereIn('type', self::OP_GROUPS[$filters['op_type']])->values()
+            : $allOperations;
+
+        $perPage = 6;
+        $page = (int) ($filters['op_page'] ?? 1);
+        $operationsPage = new LengthAwarePaginator(
+            $filtered->forPage($page, $perPage)->values(),
+            $filtered->count(),
+            $perPage,
+            $page,
+            ['pageName' => 'op_page'],
+        );
+        $operationsPage->appends(['op_type' => $filters['op_type'] ?? null]);
+
         return view('investments.show', [
-            'investment' => $investment->load(['operations.account']),
+            'investment' => $investment,
             'metrics' => $service->metrics($investment),
             'operationTypes' => InvestmentOperationType::cases(),
             'accounts' => $request->user()->accounts()->active()->orderBy('name')->get(),
+            'operationsPage' => $operationsPage,
+            'opCounts' => $counts,
+            'opType' => $filters['op_type'] ?? 'todas',
         ]);
     }
 

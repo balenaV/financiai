@@ -327,3 +327,77 @@
 .auth-steps__num { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid var(--line); font-size: 11.5px; font-weight: 800; color: var(--fg); }
 
 .link-back { display: inline-flex; align-items: center; gap: 8px; justify-self: start; font-size: 13.5px; font-weight: 700; }
+
+.auth__note { font-size: 13px; line-height: 1.5; color: var(--muted); margin: 0; }
+
+
+/* ================= Desafio de dois fatores ================= */
+
+.auth-form--mfa { display: grid; gap: 16px; }
+.auth-form--mfa[data-state="hidden"] { display: none; }
+.auth-form--mfa .field[hidden] { display: none; }
+.auth__tabs[hidden] { display: none; }
+
+.mfa-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 16px 18px;
+  border: 1.5px solid var(--hard);
+  border-radius: 13px;
+  background: var(--surface-2);
+}
+
+.mfa-callout__icon {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(56, 193, 114, 0.16);
+  color: var(--accent);
+}
+
+.mfa-callout__body { display: grid; gap: 3px; min-width: 0; }
+.mfa-callout__title { font-size: 14.5px; font-weight: 700; }
+.mfa-callout__text { font-size: 13px; line-height: 1.5; color: var(--muted); }
+
+.mfa-form { display: grid; gap: 16px; }
+
+/* .input--code vive em mfa.css, que é carregado depois deste arquivo e, por
+   cascata, já vencia esta regra em toda tela onde a classe aparece (o desafio
+   de dois fatores do login). Manter as duas definições, com valores
+   divergentes, só criava uma classe com dois donos: quem editasse aqui não
+   veria efeito nenhum. */
+
+.input--recovery {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 14px 15px;
+  text-transform: uppercase;
+}
+
+.field[data-mfa-field] .input.is-invalid { border-color: var(--danger); }
+
+.mfa-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 13px 15px;
+  border: 1.5px solid var(--danger);
+  border-radius: 11px;
+  background: rgba(179, 38, 30, 0.08);
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.mfa-error[hidden] { display: none; }
+.mfa-error__mark { flex-shrink: 0; font-weight: 800; }
+
+.mfa-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
+.link-sm--muted { color: var(--muted); }

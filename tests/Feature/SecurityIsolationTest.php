@@ -9,6 +9,8 @@ use App\Models\Category;
 use App\Models\CreditCard;
 use App\Models\FinancialGoal;
 use App\Models\User;
+use App\Services\CreditCardService;
+use App\Support\SecurityAudit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -126,5 +128,52 @@ class SecurityIsolationTest extends TestCase
         $this->actingAs($attacker)->postJson(route('transactions.import.preview', $batch), [])->assertForbidden();
         $this->actingAs($attacker)->postJson(route('transactions.import.commit', $batch), ['row_ids' => [$row->id]])->assertForbidden();
         $this->actingAs($attacker)->post(route('transactions.import.revert', $batch))->assertForbidden();
+    }
+
+    /**
+     * Achado M6: editar fatura aberta é endpoint novo que MUTA DINHEIRO a
+     * partir de um id vindo da URL. A autorização já estava correta, faltava
+     * a garantia formal — sem ela, uma regressão passaria despercebida.
+     */
+    public function test_user_cannot_edit_another_users_credit_card_bill(): void
+    {
+        $this->travelTo('2026-07-23');
+        $owner = User::factory()->create();
+        $attacker = User::factory()->create();
+        $card = CreditCard::factory()->for($owner)->create(['closing_day' => 25, 'due_day' => 30]);
+        $bill = app(CreditCardService::class)->createBill($owner, $card, [
+            'reference_month' => '2026-07',
+            'total_amount' => '100.00',
+            'due_date' => '2026-07-30',
+        ]);
+
+        $this->actingAs($attacker)
+            ->patch(route('credit-card-bills.update', $bill), [
+                'due_date' => '2026-08-10',
+                'adjustment_type' => 'acrescimo',
+                'adjustment_amount' => '999,00',
+                'adjustment_reason' => 'Invasão',
+            ])
+            ->assertForbidden();
+
+        $bill->refresh();
+        $this->assertSame('100.00', $bill->total_amount);
+        $this->assertSame('2026-07-30', $bill->due_date->toDateString());
+    }
+
+    /**
+     * O histórico de segurança lê AuditLog: nunca pode devolver a atividade
+     * de outra conta, nem com o filtro de tipo aplicado.
+     */
+    public function test_security_history_never_shows_another_users_activity(): void
+    {
+        $owner = User::factory()->create();
+        $attacker = User::factory()->create();
+
+        SecurityAudit::log($owner, 'acesso', 'Login do dono legitimo', request());
+
+        $response = $this->actingAs($attacker)->get(route('dashboard', ['sec_type' => 'acesso']));
+
+        $response->assertOk()->assertDontSee('Login do dono legitimo');
     }
 }

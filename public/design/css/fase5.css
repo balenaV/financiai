@@ -1,0 +1,130 @@
+/* ================= Ferramentas de histórico (extrato e investimentos) ================= */
+
+.history__tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 13px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.history__tools--chips { justify-content: flex-start; }
+.history__chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.history__tools .chip { font-size: 12.5px; padding: 7px 13px; }
+
+.history__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 200px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.history__search i { font-size: 12px; color: var(--muted); }
+
+.history__search input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--fg);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.history__empty {
+  padding: 30px 22px;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.history__empty[hidden] { display: none; }
+
+/* ================= Relatórios: painel detalhado ================= */
+
+.report-detail { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+
+.report-detail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 15px 20px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.report-detail__title { font-size: 14.5px; font-weight: 800; letter-spacing: -0.02em; }
+.report-detail__sub { font-size: 13px; color: var(--muted); }
+.report-detail__body[hidden] { display: none; }
+
+.report-detail__row {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) 132px 120px 124px;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13.5px;
+}
+
+.report-detail__row:hover { background: var(--surface-2); }
+
+.report-detail__row--head {
+  padding: 11px 20px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: transparent;
+}
+
+.report-detail__row--head button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.report-detail__row--head button:hover { color: var(--fg); }
+.report-detail__row--head button i { font-size: 9px; opacity: 0.55; }
+.report-detail__row--head button.is-active { color: var(--fg); }
+.report-detail__row--head button.is-active i { opacity: 1; color: var(--accent); }
+.report-detail__row--head .is-right { justify-content: flex-end; }
+.report-detail__date { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--muted); }
+.report-detail__desc { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.report-detail__value { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.report-detail__value.is-in { color: var(--accent); }
+
+/* Delta comparativo nos KPIs de relatórios */
+.kpi__delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.kpi__delta i { font-size: 9px; }

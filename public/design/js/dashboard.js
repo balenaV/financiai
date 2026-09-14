@@ -181,10 +181,21 @@
         // casos ele é posicionado em coordenadas fixas, fora do fluxo do card.
         if (!aberto && drop.hasAttribute('data-dropdown-fixed')) {
           var rect = btn.getBoundingClientRect();
+          var alturaMenu = menu.getBoundingClientRect().height;
+          var espacoAbaixo = window.innerHeight - rect.bottom;
           menu.style.position = 'fixed';
-          menu.style.top = (rect.bottom + 6) + 'px';
           menu.style.right = (window.innerWidth - rect.right) + 'px';
           menu.style.left = 'auto';
+          // Linhas perto do fim da tela (comum em listas longas, ex.: revisão
+          // de importação) não têm espaço embaixo — sem isso o menu abria fora
+          // da viewport e ficava efetivamente invisível até rolar a página.
+          if (espacoAbaixo < alturaMenu + 6 && rect.top > alturaMenu + 6) {
+            menu.style.top = 'auto';
+            menu.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+          } else {
+            menu.style.bottom = 'auto';
+            menu.style.top = (rect.bottom + 6) + 'px';
+          }
         }
       }
       return;
@@ -390,6 +401,25 @@
       painel.hidden = aberto;
       btn.setAttribute('aria-expanded', String(!aberto));
     });
+
+    /* Reprograma um datepicker já montado com um novo valor — usado ao
+       reabrir modais (ex.: editar fatura) preenchidos com dado de outra
+       fatura/registro. Sem isso o clique num dia continuaria partindo do
+       "sel"/"visto" da primeira renderização da página. */
+    dp.__definir = function (isoValue) {
+      var p = (isoValue || '').split('-');
+      if (p.length === 3) {
+        sel = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+        visto = new Date(sel.getFullYear(), sel.getMonth(), 1);
+        dp.dataset.value = isoValue;
+        if (rotulo) rotulo.textContent = br(sel);
+      } else {
+        dp.dataset.value = '';
+        if (rotulo) rotulo.textContent = '';
+      }
+      if (oculto) oculto.value = isoValue || '';
+      if (!painel.hidden) desenhar();
+    };
 
     painel.addEventListener('click', function (e) {
       e.stopPropagation();
@@ -627,6 +657,8 @@
       estado.innerHTML = paga ? '<i class="fa-solid fa-check" aria-hidden="true"></i>Paga' : '<i class="fa-regular fa-clock" aria-hidden="true"></i>Em aberto';
     }
     if (pagar) pagar.hidden = paga;
+    var editar = painel.querySelector('[data-invoice-edit]');
+    if (editar) editar.hidden = slide.dataset.canEdit !== '1';
     if (prev) prev.style.opacity = indice >= todos.length - 1 ? '0.4' : '';
     if (next) next.style.opacity = indice <= 0 ? '0.4' : '';
 
@@ -663,7 +695,53 @@
     modal.hidden = false;
   }
 
+  function abrirEdicaoFatura(painel) {
+    var slide = slideVisivel(painel);
+    var modal = document.querySelector('[data-modal="fatura"]');
+    if (!slide || !modal) return;
+    var tituloEl = painel.querySelector('.invoices__title');
+    var titulo = tituloEl ? tituloEl.textContent : '';
+    var form = modal.querySelector('[data-fatura-form]');
+    if (form) form.action = slide.dataset.editUrl;
+    var card = modal.querySelector('[data-fatura-card]');
+    if (card) card.textContent = titulo.replace(/^Faturas · /, '') + ' · ' + slide.dataset.month;
+
+    var due = modal.querySelector('[data-fatura-due]');
+    if (due) {
+      var dp = due.closest('[data-datepicker]') || (due.parentNode && due.parentNode.querySelector('[data-datepicker]'));
+      if (dp && dp.__definir) dp.__definir(slide.dataset.dueDate);
+    }
+
+    var tipo = slide.dataset.adjustmentType || 'acrescimo';
+    var tipoInput = modal.querySelector('[data-fatura-adjustment-type]');
+    if (tipoInput) {
+      tipoInput.value = tipo;
+      var grupo = tipoInput.closest('[data-chip-group]') || modal.querySelector('[data-chip-group]');
+      if (grupo) {
+        grupo.querySelectorAll('.chip').forEach(function (chip) {
+          chip.classList.toggle('is-selected', chip.dataset.value === tipo);
+        });
+      }
+    }
+    var amount = modal.querySelector('[data-fatura-adjustment-amount]');
+    if (amount) {
+      var valor = Number(slide.dataset.adjustmentAmount || '0');
+      amount.value = valor ? valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+    }
+    var motivo = modal.querySelector('[data-fatura-reason]');
+    if (motivo) motivo.value = slide.dataset.adjustmentReason || '';
+
+    modal.hidden = false;
+    document.body.style.overflow = 'hidden';
+  }
+
   document.addEventListener('click', function (ev) {
+    var editarFatura = ev.target.closest('[data-invoice-edit]');
+    if (editarFatura) {
+      var painelEdicao = editarFatura.closest('[data-invoices-panel]');
+      if (painelEdicao) abrirEdicaoFatura(painelEdicao);
+    }
+
     var ver = ev.target.closest('[data-card-invoices]');
     if (ver) abrirPainel(ver.dataset.cardInvoices);
 

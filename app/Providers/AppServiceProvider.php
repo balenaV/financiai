@@ -4,7 +4,10 @@ namespace App\Providers;
 
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Notifications\Messages\MailMessage;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 
@@ -26,6 +29,17 @@ class AppServiceProvider extends ServiceProvider
         if ($this->app->environment('production')) {
             URL::forceScheme('https');
         }
+
+        // O desafio de dois fatores é limitado pelo usuário do desafio, não
+        // pelo IP: como quem chega aqui já provou a senha, deixar o IP na
+        // chave permitiria varrer o TOTP reiniciando o balde a cada troca de
+        // proxy (achado A2). O IP entra só como desempate para requisições
+        // sem sessão de desafio, que não deveriam existir.
+        RateLimiter::for('two-factor', function (Request $request) {
+            $userId = $request->session()->get('two_factor.user_id');
+
+            return Limit::perMinute(10)->by('two-factor|'.($userId ?? $request->ip()));
+        });
 
         VerifyEmail::toMailUsing(function (object $notifiable, string $verificationUrl): MailMessage {
             $expiration = (int) config('auth.verification.expire', 60);

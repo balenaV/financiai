@@ -19,8 +19,14 @@
                 <span class="form-label">Referência</span>
                 <p class="form-control bg-slate-50">{{ $bill->reference_month->translatedFormat('F/Y') }}</p>
             </div>
-            <x-form.input label="Valor total" name="total_amount" data-money-input inputmode="decimal" :value="$bill->total_amount" required />
-            <x-form.textarea label="Observações" name="notes" :value="$bill->notes" />
+            <x-form.input label="Vencimento desta fatura" name="due_date" type="date" :value="$bill->due_date->format('Y-m-d')" />
+            <x-form.select label="Ajuste manual" name="adjustment_type">
+                <option value="acrescimo" @selected(bccomp($bill->adjustment_amount, '0', 2) >= 0)>Acréscimo</option>
+                <option value="desconto" @selected(bccomp($bill->adjustment_amount, '0', 2) < 0)>Desconto</option>
+            </x-form.select>
+            <x-form.input label="Valor do ajuste" name="adjustment_amount" data-money-input inputmode="decimal" :value="ltrim($bill->adjustment_amount, '-')" />
+            <x-form.input label="Motivo" name="adjustment_reason" :value="$bill->adjustment_reason" />
+            <p class="text-xs text-slate-500">O ajuste substitui o anterior — não é somado a ele. Vale só para esta fatura; o cartão continua com as regras padrão.</p>
         </div>
 
         <div class="mt-7 flex justify-end gap-2">

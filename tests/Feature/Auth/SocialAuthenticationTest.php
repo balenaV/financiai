@@ -76,11 +76,54 @@ class SocialAuthenticationTest extends TestCase
             'provider' => 'google',
             'provider_user_id' => 'google-user-123',
         ]);
+        $response->assertSessionHas('success', 'Bem-vindo(a) ao financiaí! Sua conta foi criada com sucesso.');
+
+        $this->get(route('dashboard'))->assertSee('Bem-vindo(a) ao financiaí! Sua conta foi criada com sucesso.');
     }
 
-    public function test_github_callback_links_an_existing_user_without_duplicating_it(): void
+    public function test_returning_oauth_user_does_not_see_the_welcome_message(): void
     {
-        $user = User::factory()->unverified()->create(['email' => 'victor@example.com']);
+        $user = User::factory()->create(['email' => 'victor@example.com']);
+        $user->socialAccounts()->create([
+            'provider' => 'google',
+            'provider_user_id' => 'google-user-123',
+        ]);
+
+        $this->configureProvider('google');
+        $this->fakeProvider('google', [
+            'id' => 'google-user-123',
+            'name' => 'Victor Balena',
+            'email' => 'victor@example.com',
+        ]);
+
+        $response = $this->get('/auth/google/callback');
+
+        $response->assertRedirect(route('dashboard', absolute: false));
+        $this->assertAuthenticatedAs($user);
+        $response->assertSessionMissing('success');
+    }
+
+    public function test_linking_an_existing_user_by_email_does_not_show_the_welcome_message(): void
+    {
+        $user = User::factory()->create(['email' => 'victor@example.com']);
+
+        $this->configureProvider('github');
+        $this->fakeProvider('github', [
+            'id' => 'github-user-456',
+            'name' => 'Victor',
+            'email' => 'VICTOR@example.com',
+        ]);
+
+        $response = $this->get('/auth/github/callback');
+
+        $response->assertRedirect(route('dashboard', absolute: false));
+        $this->assertAuthenticatedAs($user);
+        $response->assertSessionMissing('success');
+    }
+
+    public function test_github_callback_links_an_existing_verified_user_without_duplicating_it(): void
+    {
+        $user = User::factory()->create(['email' => 'victor@example.com']);
 
         $this->configureProvider('github');
         $this->fakeProvider('github', [
@@ -99,6 +142,88 @@ class SocialAuthenticationTest extends TestCase
             'provider' => 'github',
             'provider_user_id' => 'github-user-456',
         ]);
+    }
+
+    public function test_social_login_does_not_hijack_an_unverified_local_account_with_the_same_email(): void
+    {
+        $victim = User::factory()->unverified()->create(['email' => 'victor@example.com']);
+
+        $this->configureProvider('github');
+        $this->fakeProvider('github', [
+            'id' => 'github-user-456',
+            'name' => 'Victor',
+            'email' => 'VICTOR@example.com',
+        ]);
+
+        $response = $this->get('/auth/github/callback');
+
+        $response->assertRedirect(route('login'))->assertSessionHasErrors('social');
+        $this->assertGuest();
+        $this->assertNull($victim->fresh()->email_verified_at);
+        $this->assertDatabaseMissing('social_accounts', [
+            'user_id' => $victim->id,
+            'provider' => 'github',
+        ]);
+        $this->assertSame(1, User::count());
+    }
+
+    public function test_social_login_does_not_force_verify_an_email_changed_after_linking(): void
+    {
+        $user = User::factory()->create(['email' => 'victor@example.com']);
+        $user->socialAccounts()->create([
+            'provider' => 'google',
+            'provider_user_id' => 'google-user-123',
+        ]);
+
+        // Simula uma troca de e-mail feita depois do vínculo (ProfileController::update
+        // zera email_verified_at), ainda sem o usuário ter provado posse do novo endereço.
+        $user->forceFill(['email' => 'novo-email@example.com', 'email_verified_at' => null])->save();
+
+        $this->configureProvider('google');
+        $this->fakeProvider('google', [
+            'id' => 'google-user-123',
+            'name' => 'Victor Balena',
+            'email' => 'victor@example.com',
+        ]);
+
+        $response = $this->get('/auth/google/callback');
+
+        $response->assertRedirect(route('dashboard', absolute: false));
+        $this->assertAuthenticatedAs($user);
+        $this->assertNull($user->fresh()->email_verified_at);
+    }
+
+    public function test_victim_cannot_be_taken_over_after_attacker_changes_email_to_hers(): void
+    {
+        $attacker = User::factory()->create(['email' => 'atacante@example.com']);
+        $attacker->socialAccounts()->create([
+            'provider' => 'google',
+            'provider_user_id' => 'google-attacker-id',
+        ]);
+
+        // Simula o atacante trocando o e-mail da própria conta para o da vítima em
+        // /profile (ProfileController zera email_verified_at nessa troca).
+        $attacker->forceFill(['email' => 'vitima@example.com', 'email_verified_at' => null])->save();
+
+        // A vítima, dona de verdade de vitima@example.com, tenta entrar com o
+        // provedor dela pela primeira vez.
+        $this->configureProvider('github');
+        $this->fakeProvider('github', [
+            'id' => 'github-victim-id',
+            'name' => 'Vítima',
+            'email' => 'vitima@example.com',
+        ]);
+
+        $response = $this->get('/auth/github/callback');
+
+        $response->assertRedirect(route('login'))->assertSessionHasErrors('social');
+        $this->assertGuest();
+        $this->assertDatabaseMissing('social_accounts', [
+            'user_id' => $attacker->id,
+            'provider' => 'github',
+        ]);
+        $this->assertNull($attacker->fresh()->email_verified_at);
+        $this->assertSame(1, User::count());
     }
 
     public function test_social_registration_respects_the_registration_feature_flag(): void

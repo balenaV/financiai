@@ -85,6 +85,65 @@ class DashboardReportTest extends TestCase
         $this->actingAs($user)->get(route('dashboard', ['account_id' => $foreign->id]))->assertNotFound();
     }
 
+    public function test_report_detail_panel_lists_only_the_users_transactions_in_the_six_month_window(): void
+    {
+        $user = User::factory()->create();
+        $other = User::factory()->create();
+        $account = Account::factory()->for($user)->create();
+        $foreignAccount = Account::factory()->for($other)->create();
+        $this->createIncome($user, $account, '250.00');
+        $this->createIncome($other, $foreignAccount, '999.00');
+
+        $response = $this->actingAs($user)->get(route('dashboard'));
+
+        $response->assertOk()->assertSee('Receita teste')->assertDontSee('999,00');
+    }
+
+    public function test_report_detail_panel_opens_and_sorts_when_query_params_are_present(): void
+    {
+        $user = User::factory()->create();
+        $account = Account::factory()->for($user)->create();
+        $this->createIncome($user, $account, '100.00');
+
+        $response = $this->actingAs($user)->get(route('dashboard', ['rep_sort' => 'valor', 'rep_dir' => 'asc']));
+
+        $response->assertOk()->assertSee('report-detail__body', false)->assertDontSee('report-detail__body" hidden', false);
+    }
+
+    public function test_report_detail_panel_paginates_at_eight_per_page(): void
+    {
+        $user = User::factory()->create();
+        $account = Account::factory()->for($user)->create();
+        for ($i = 0; $i < 9; $i++) {
+            $this->createIncome($user, $account, (string) (10 + $i).'.00');
+        }
+
+        $response = $this->actingAs($user)->get(route('dashboard', ['rep_sort' => 'data']));
+
+        $response->assertOk()->assertSee('Mostrando 1–8 de 9 lançamentos');
+    }
+
+    public function test_report_kpi_delta_reflects_current_month_versus_previous_month(): void
+    {
+        $user = User::factory()->create();
+        $account = Account::factory()->for($user)->create();
+        $this->createIncome($user, $account, '1000.00');
+        $user->transactions()->create([
+            'account_id' => $account->id,
+            'category_id' => $user->categories()->where('name', 'Salário')->value('id'),
+            'type' => 'income',
+            'description' => 'Receita mês anterior',
+            'amount' => '500.00',
+            'competence_date' => now()->subMonthNoOverflow(),
+            'paid_at' => now()->subMonthNoOverflow(),
+            'status' => 'completed',
+        ]);
+
+        $response = $this->actingAs($user)->get(route('dashboard'));
+
+        $response->assertOk()->assertSee('vs. mês anterior');
+    }
+
     private function createIncome(User $user, Account $account, string $amount): void
     {
         $user->transactions()->create([
